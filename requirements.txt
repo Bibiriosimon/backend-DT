@@ -30,3 +30,4 @@ charset-normalizer==3.4.2
 packaging==25.0
 Flask-SQLAlchemy
 psycopg2-binary
+PyJWT
