@@ -1,105 +1,85 @@
 # app.py
 
-import os
-from flask import Flask, request, jsonify
+import os # 导入 os 模块来读取环境变量
+from flask import Flask, jsonify, request
 from flask_cors import CORS
-import requests
-from dotenv import load_dotenv
+from flask_sqlalchemy import SQLAlchemy # 导入 SQLAlchemy
 
-# --- 新增的导入 ---
-from flask_sqlalchemy import SQLAlchemy
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity, JWTManager
-import uuid # 用于生成独一无二的用户ID
-
-# 加载环境变量
-load_dotenv()
-
-# --- 初始化应用和扩展 ---
+# 1. 初始化 app
 app = Flask(__name__)
-CORS(app) # 允许所有来源的跨域请求，方便开发
+CORS(app) # 允许跨域请求
 
-# 1. 配置数据库
-#    从环境变量中获取数据库的连接地址
-#    我们之前在 Render 后台设置的 DATABASE_URL 就在这里被用上了
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
-#    关闭一个不必要的警告信息
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+# 2. 配置数据库
+#    从环境变量中获取数据库连接 URL
+#    os.environ.get('DATABASE_URL') 是关键，它会读取我们在 Render 上设置的环境变量
+#    我们还需要对 Render 提供的 URL 做一点小小的修改，因为它以 postgres:// 开头，
+#    而 SQLAlchemy 新版本推荐使用 postgresql://
+db_url = os.environ.get('DATABASE_URL')
+if db_url and db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
 
-# 2. 配置 JWT
-#    设置一个用于签署 JWT 的密钥，防止令牌被篡改
-#    在生产环境中，这应该是一个更复杂、更安全的随机字符串
-app.config["JWT_SECRET_KEY"] = "your-super-secret-key-change-it-later" # 以后可以换成更复杂的
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # 关闭一个不必要的特性，节省资源
 
-# 3. 初始化扩展
-db = SQLAlchemy(app) # 初始化 SQLAlchemy，把它和我们的 Flask app 关联起来
-jwt = JWTManager(app) # 初始化 JWTManager
+# 3. 初始化 SQLAlchemy 对象
+db = SQLAlchemy(app)
 
-# --- 数据库模型定义 (The Blueprint) ---
-#    我们在这里定义 "User" 这张表长什么样
-
+# 4. 定义数据模型 (Model) - 这就是我们的第一张表！
+#    我们会创建一个 User 模型，用来存储用户信息
 class User(db.Model):
-    __tablename__ = 'users' # 定义在数据库中的表名
-
-    # 定义字段 (列)
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    password = db.Column(db.String(120), nullable=False) # 注意：现在是明文存储
-
-    # 定义一个简单的方法，方便我们把用户信息转换成字典格式
+    __tablename__ = 'users' # 自定义表名，可选
+    id = db.Column(db.Integer, primary_key=True) # 用户ID，主键
+    username = db.Column(db.String(80), unique=True, nullable=False) # 用户名，唯一且不能为空
+    password = db.Column(db.String(120), nullable=False) # 密码，不能为空（我们暂时先存明文）
+    
+    # 这个方法是为了方便地将对象转换成字典，以便返回 JSON
     def to_dict(self):
         return {
-            "id": self.id,
-            "username": self.username
+            'id': self.id,
+            'username': self.username
+            # 注意：我们不会在 to_dict 中返回密码！
         }
 
-# --- 创建数据库表的命令 ---
-# 这个函数只在第一次部署或需要创建新表时手动运行一次
-# 它会检查所有的模型（比如User类），并在数据库中创建对应的表
-@app.cli.command("create-db")
-def create_db():
-    """在数据库中创建所有表"""
-    with app.app_context():
-        db.create_all()
-    print("Database tables created!")
+# -------------------- API 路由 --------------------
 
-
-# --- 原有的 DeepL 翻译 API ---
-# 我们暂时保留这个接口，之后可以学习如何保护它
-@app.route('/api/translate', methods=['POST'])
-def translate_text():
-    data = request.json
-    text_to_translate = data.get('text')
-    target_lang = data.get('target_lang', 'ZH')
-
-    if not text_to_translate:
-        return jsonify({"error": "No text provided"}), 400
-
-    auth_key = os.environ.get("DEEPL_AUTH_KEY")
-    if not auth_key:
-        return jsonify({"error": "DeepL API key not configured"}), 500
-
-    api_url = "https://api-free.deepl.com/v2/translate"
-    
-    payload = {
-        'auth_key': auth_key,
-        'text': text_to_translate,
-        'target_lang': target_lang
-    }
-
+# 一个用于测试数据库连接的临时路由
+@app.route('/test_db')
+def test_db():
     try:
-        response = requests.post(api_url, data=payload)
-        response.raise_for_status() 
-        translated_data = response.json()
-        return jsonify(translated_data)
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 500
+        # 尝试执行一个简单的查询
+        # db.session.query(1) 会执行类似 SELECT 1 的SQL语句
+        db.session.query(User).all() 
+        return "数据库连接成功！User 表也已成功映射！"
+    except Exception as e:
+        # 如果有任何错误，打印出来，方便调试
+        return f"数据库连接失败: {e}"
 
-# --- 根路径 ---
-@app.route('/')
-def index():
-    return "Backend server is running."
+# 原有的 /api/todos 路由，我们暂时保留
+todos = []
+@app.route('/api/todos', methods=['GET', 'POST'])
+def handle_todos():
+    if request.method == 'POST':
+        data = request.get_json()
+        new_todo = data.get('text')
+        if new_todo:
+            todos.append(new_todo)
+            return jsonify(todos), 201
+        return jsonify({'error': 'Todo text is required'}), 400
+    else:
+        return jsonify(todos)
+
+# -------------------- 数据库表创建 --------------------
+# 这是一个非常重要的部分
+# 我们需要一种方式来告诉 SQLAlchemy：“请根据我定义的 User 模型，去数据库里创建那张表”
+# 下面的代码块实现了这个功能
+with app.app_context():
+    # 这会检查数据库中是否存在名为 'users' 的表
+    # 如果不存在，它会根据上面定义的 User 类创建这张表
+    db.create_all()
+
 
 if __name__ == '__main__':
-    # 使用 app.run() 会启动 Flask 内置的开发服务器
-    # 在生产环境中 (比如Render)，我们会用 gunicorn 来启动
-    app.run(debug=True, port=5001)
+    # 注意：Render 会用 gunicorn 启动，不会直接运行这里。
+    # 但为了本地测试方便，我们保留它。
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
