@@ -119,6 +119,30 @@ def handle_todos():
         return jsonify({'error': 'Todo text is required'}), 400
     else:
         return jsonify(todos)
+# ------------------------------------------------------------------
+# 警告：这是一个临时的、用于重置数据库的超级管理员接口
+# ------------------------------------------------------------------
+@app.route('/admin/reset-database/areyousure/<secret_key>')
+def reset_database(secret_key):
+    # 设置一个简单的密码，防止被意外触发
+    # 在真实项目中，这个密码应该更复杂或来自环境变量
+    if secret_key != "my_secret_reset_word":
+        return jsonify({"error": "密码错误，无法执行危险操作"}), 403
+
+    try:
+        with app.app_context():
+            # 先删除所有表
+            db.drop_all()
+            # 再根据最新的模型创建所有表
+            db.create_all()
+        
+        # 返回成功信息
+        return jsonify({"message": "数据库已成功重置！所有表已根据最新模型重建。"}), 200
+
+    except Exception as e:
+        # 如果出错，返回错误信息
+        return jsonify({"error": f"重置数据库时发生错误: {str(e)}"}), 500
+
 
 
 if __name__ == '__main__':
