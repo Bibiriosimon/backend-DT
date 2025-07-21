@@ -1,61 +1,113 @@
 # app.py
 
-import os # 导入 os 模块来读取环境变量
+import os
+import datetime # 用于设置 JWT 的过期时间
+import jwt # 导入 PyJWT 库
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from flask_sqlalchemy import SQLAlchemy # 导入 SQLAlchemy
+from flask_sqlalchemy import SQLAlchemy
 
-# 1. 初始化 app
+# --- 初始化和配置 (和之前一样) ---
 app = Flask(__name__)
-CORS(app) # 允许跨域请求
+CORS(app)
 
-# 2. 配置数据库
-#    从环境变量中获取数据库连接 URL
-#    os.environ.get('DATABASE_URL') 是关键，它会读取我们在 Render 上设置的环境变量
-#    我们还需要对 Render 提供的 URL 做一点小小的修改，因为它以 postgres:// 开头，
-#    而 SQLAlchemy 新版本推荐使用 postgresql://
 db_url = os.environ.get('DATABASE_URL')
 if db_url and db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # 关闭一个不必要的特性，节省资源
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# 3. 初始化 SQLAlchemy 对象
+# 新增：从环境变量获取 SECRET_KEY
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'my-default-secret-key') # 提供一个默认值以防万一
+
 db = SQLAlchemy(app)
 
-# 4. 定义数据模型 (Model) - 这就是我们的第一张表！
-#    我们会创建一个 User 模型，用来存储用户信息
+# --- 数据模型 (和之前一样) ---
 class User(db.Model):
-    __tablename__ = 'users' # 自定义表名，可选
-    id = db.Column(db.Integer, primary_key=True) # 用户ID，主键
-    username = db.Column(db.String(80), unique=True, nullable=False) # 用户名，唯一且不能为空
-    password = db.Column(db.String(120), nullable=False) # 密码，不能为空（我们暂时先存明文）
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(120), nullable=False)
     
-    # 这个方法是为了方便地将对象转换成字典，以便返回 JSON
     def to_dict(self):
         return {
             'id': self.id,
             'username': self.username
-            # 注意：我们不会在 to_dict 中返回密码！
         }
+
+# --- 数据库表创建 (和之前一样，但在部署时不再是必需的) ---
+# 这段代码在第一次部署时很有用，之后可以保持原样
+with app.app_context():
+    db.create_all()
+
 
 # -------------------- API 路由 --------------------
 
-# 一个用于测试数据库连接的临时路由
+# --- 新增：注册 API ---
+@app.route('/api/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    if not username or not password:
+        return jsonify({'error': 'Do not be blank'}), 400
+
+    # 检查用户名是否已存在
+    if User.query.filter_by(username=username).first():
+        return jsonify({'error': '有老登比你先来一步，try another user name'}), 409 # 409 Conflict
+
+    # 创建新用户实例 (暂时用明文密码)
+    new_user = User(username=username, password=password)
+    
+    # 添加到数据库会话并提交
+    db.session.add(new_user)
+    db.session.commit()
+
+    return jsonify({'message': '欢迎加入我们,welcome to our family', 'user': new_user.to_dict()}), 201
+
+
+# --- 新增：登录 API ---
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    if not username or not password:
+        return jsonify({'error': 'Please enter user name and secret key'}), 400
+
+    # 在数据库中查找用户
+    user = User.query.filter_by(username=username).first()
+
+    # 验证用户是否存在以及密码是否匹配
+    if user and user.password == password: # 暂时直接比较明文密码
+        # 登录成功，生成 JWT
+        token = jwt.encode({
+            'user_id': user.id,
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24) # Token有效期24小时
+        }, app.config['SECRET_KEY'], algorithm='HS256')
+        
+        return jsonify({
+            'message': 'Here we go baby!',
+            'token': token,
+            'user': user.to_dict()
+        })
+    else:
+        return jsonify({'error': 'error,give another try baby!'}), 401 # 401 Unauthorized
+
+
+# --- 保留的测试和旧的 todos API ---
 @app.route('/test_db')
 def test_db():
     try:
-        # 尝试执行一个简单的查询
-        # db.session.query(1) 会执行类似 SELECT 1 的SQL语句
         db.session.query(User).all() 
         return "数据库连接成功！User 表也已成功映射！"
     except Exception as e:
-        # 如果有任何错误，打印出来，方便调试
         return f"数据库连接失败: {e}"
 
-# 原有的 /api/todos 路由，我们暂时保留
-todos = []
+todos = [] # 旧的 todos 我们暂时不动它，之后会改造
 @app.route('/api/todos', methods=['GET', 'POST'])
 def handle_todos():
     if request.method == 'POST':
@@ -68,10 +120,8 @@ def handle_todos():
     else:
         return jsonify(todos)
 
-# -------------------- 数据库表创建 ------------------
 
 if __name__ == '__main__':
-    # 注意：Render 会用 gunicorn 启动，不会直接运行这里。
-    # 但为了本地测试方便，我们保留它。
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
