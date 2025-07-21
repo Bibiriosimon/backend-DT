@@ -28,3 +28,5 @@ idna==3.10
 certifi==2025.7.14
 charset-normalizer==3.4.2
 packaging==25.0
+Flask-SQLAlchemy
+psycopg2-binary
