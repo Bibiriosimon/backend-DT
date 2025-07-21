@@ -1,0 +1,183 @@
+
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能作业批改 Agent</title>
+    
+    <!-- KaTeX 的 CSS 样式文件 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0KOVEMeaPoAbtnUKGkRdC_jbZsHtk4Pq7hDRCQR8+PKGZgSbeC1Iw" crossorigin="anonymous">
+
+    <!-- 自己的样式文件 -->
+    <link rel="stylesheet" href="style.css"> 
+</head>
+<body>
+
+    <!-- 酷炫的气泡背景 -->
+    <div class="background-bubbles">
+      <div class="bubble"><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="bubble"><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="bubble"><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="bubble"><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="bubble"><span></span><span></span><span></span><span></span><span></span></div>
+    </div>
+    
+    <!-- ✨【修改】右侧竖向导航切换器 -->
+    <div class="mode-switcher-container">
+        <div class="radio-container">
+            <!-- 按钮1: 作业批改 (当前页面) -->
+            <input checked="" id="nav-grading" name="navigation" type="radio" value="grading" />
+            <label for="nav-grading">作业批改</label>
+            
+            <!-- 按钮2: 同声传译 (链接到外部网址) -->
+            <input id="nav-translation" name="navigation" type="radio" value="translation" />
+            <label for="nav-translation">同声传译</label>
+            
+            <!-- 按钮3: 敬请期待 (禁用) -->
+            <input id="nav-future" name="navigation" type="radio" value="future" disabled />
+            <label for="nav-future">敬请期待</label>
+        
+            <!-- 这是辉光效果的滑块 -->
+            <div class="glider-container">
+              <div class="glider"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ✨【新增】右下角赛博卡片 -->
+    <div class="cyber-card-container">
+      <div class="container noselect">
+        <div class="canvas">
+          <div class="tracker tr-1"></div><div class="tracker tr-2"></div><div class="tracker tr-3"></div>
+          <div class="tracker tr-4"></div><div class="tracker tr-5"></div><div class="tracker tr-6"></div>
+          <div class="tracker tr-7"></div><div class="tracker tr-8"></div><div class="tracker tr-9"></div>
+          <div class="tracker tr-10"></div><div class="tracker tr-11"></div><div class="tracker tr-12"></div>
+          <div class="tracker tr-13"></div><div class="tracker tr-14"></div><div class="tracker tr-15"></div>
+          <div class="tracker tr-16"></div><div class="tracker tr-17"></div><div class="tracker tr-18"></div>
+          <div class="tracker tr-19"></div><div class="tracker tr-20"></div><div class="tracker tr-21"></div>
+          <div class="tracker tr-22"></div><div class="tracker tr-23"></div><div class="tracker tr-24"></div>
+          <div class="tracker tr-25"></div>
+          <div id="card">
+            <div class="card-content">
+              <div class="card-glare"></div>
+              <div class="cyber-lines"><span></span><span></span><span></span><span></span></div>
+              <p id="prompt">西安交通<br>大学</p>
+              <div class="title">科技<br>赋能生活 <br />AI<br>改变世界</div>
+              <div class="glowing-elements">
+                <div class="glow-1"></div><div class="glow-2"></div><div class="glow-3"></div>
+              </div>
+              <div class="subtitle"><span>Made by</span><span class="highlight">Bibi&CQC</span></div>
+              <div class="card-particles"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+              <div class="corner-elements"><span></span><span></span><span></span><span></span></div>
+              <div class="scan-line"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 统一的页头 -->
+    <header>
+      <div class="header-content">
+        <div class="logo">AIIC联合作业批改<span> Agent</span></div>
+      </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main>
+
+      <!-- STEP 1: SETUP FORM -->
+      <div id="setup-container" class="content-card">
+        <h2>设置批改参数</h2>
+        <p>请先设置批改模式和要求，然后提交作业文件。</p>
+        
+        <form id="setup-form">
+          <div class="form-group">
+            <label for="model-select">请选择模式</label>
+            <select id="model-select" name="model">
+              <option value="作业提交">作业提交</option>
+              <option value="自我提升">自我提升</option>
+            </select>
+          </div>
+    
+          <div class="form-group" id="chapter-group">
+            <label for="chapter-select">请选择章节 (教师设置)</label>
+            <input type="number" id="chapter-select" name="chapter" min="1" max="10" value="1">
+          </div>
+    
+          <div class="form-group">
+            <label for="score-scale">题目满分</label>
+            <input type="number" id="score-scale" name="score_scale" min="1" value="10">
+          </div>
+    
+          <div class="form-group">
+            <label for="feedback-select">解析反馈</label>
+            <select id="feedback-select" name="feedback">
+              <option value="是">展示解析</option>
+              <option value="否">隐藏解析</option>
+            </select>
+          </div>
+    
+          <button type="button" id="next-to-upload-btn" class="btn">下一步：上传文件</button>
+        </form>
+      </div>
+    
+      <!-- STEP 2: FILE UPLOAD -->
+      <div id="upload-container" class="content-card" style="display: none;">
+        <h2>第二步：上传作业文件 (PDF)</h2>
+        <p>支持多份 PDF 文件，可拖拽或点击上传。</p>
+        <div id="file-drop-zone">
+          <p>拖拽文件到此处或 📂 点击选择</p>
+          <input type="file" id="file-input" multiple accept=".pdf" style="display: none;">
+        </div>
+        <ul id="file-list"></ul>
+        <div class="button-group">
+            <button type="button" id="back-to-setup-btn" class="btn">返回修改</button>
+            <button type="button" id="start-analysis-btn" class="btn" disabled>开始分析</button>
+        </div>
+      </div>
+    
+      <!-- STEP 3: PROCESSING & RESULTS -->
+      <div id="results-container" class="content-card" style="display: none;">
+        <div id="loading-state">
+          <div class="pyramid-loader">
+            <div class="wrapper">
+              <span class="side side1"></span><span class="side side2"></span>
+              <span class="side side3"></span><span class="side side4"></span>
+              <span class="shadow"></span>
+            </div>  
+          </div>
+          <h3 id="loading-title">Agent 正在智能分析中...</h3>
+          <p id="loading-status">正在初始化模型...</p>
+        </div>
+        <div id="final-results" style="display: none;">
+            <h2>分析报告</h2>
+            <div id="results-list"></div>
+            <button type="button" id="restart-btn" class="btn">批改下一份作业</button>
+        </div>
+      </div>
+
+    </main>
+    
+    <!-- 脚本加载区 -->
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="script.js"></script>
+
+    <!-- 用于处理导航跳转的内联脚本 -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const translationRadio = document.getElementById('nav-translation');
+            if (translationRadio) {
+                translationRadio.addEventListener('click', () => {
+                    // 在新标签页中打开你的同声传译应用网址
+                    window.open('https://bibiriosimon.github.io/Simu_InterpAgent-version-for-PC/', '_blank');
+                });
+            }
+        });
+    </script>
+
+</body>
+</html>
