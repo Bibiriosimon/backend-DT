@@ -55,7 +55,7 @@ function runApp() {
     const spinnerMessage = document.getElementById('spinnerMessage');
 
     // --- API & 配置 ---
-    const BACKEND_API_BASE_URL = 'http://127.0.0.1:5001'; // 我们后端的地址
+    const BACKEND_API_BASE_URL = 'https://backend-dt.onrender.com'; 
     const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
     const DEEPL_API_URL = 'https://api-free.deepl.com/v2/translate';
 
