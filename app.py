@@ -1,16 +1,18 @@
-# app.py
+# app.py (最终完整版)
 
 import os
-import datetime # 用于设置 JWT 的过期时间
-import jwt # 导入 PyJWT 库
+import datetime
+import jwt
+import requests # <-- 确保导入了 requests 库
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 
-# --- 初始化和配置 (和之前一样) ---
+# --- 1. 初始化和配置 ---
 app = Flask(__name__)
-CORS(app)
+CORS(app) # 允许所有来源的跨域请求
 
+# 数据库URL配置 (适配Render的PostgreSQL)
 db_url = os.environ.get('DATABASE_URL')
 if db_url and db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
@@ -18,17 +20,17 @@ if db_url and db_url.startswith("postgres://"):
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# 新增：从环境变量获取 SECRET_KEY
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'my-default-secret-key') # 提供一个默认值以防万一
+# 从环境变量获取 SECRET_KEY，用于JWT签名
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a-very-strong-default-secret-key-for-local-dev')
 
 db = SQLAlchemy(app)
 
-# --- 数据模型 (和之前一样) ---
+# --- 2. 数据模型 (用户信息) ---
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    password = db.Column(db.String(120), nullable=False)
+    password = db.Column(db.String(120), nullable=False) # 在真实项目中，这里应该是哈希后的密码
     
     def to_dict(self):
         return {
@@ -36,15 +38,18 @@ class User(db.Model):
             'username': self.username
         }
 
-# --- 数据库表创建 (和之前一样，但在部署时不再是必需的) ---
-# 这段代码在第一次部署时很有用，之后可以保持原样
+# --- 3. 数据库表创建 ---
+# 在应用上下文中创建所有定义的数据库表
 with app.app_context():
     db.create_all()
 
 
-# -------------------- API 路由 --------------------
+# =======================================================
+# ==================== API 路由 =========================
+# =======================================================
 
-# --- 新增：注册 API ---
+# --- 4. 用户认证 API ---
+
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -52,23 +57,17 @@ def register():
     password = data.get('password')
 
     if not username or not password:
-        return jsonify({'error': 'Do not be blank'}), 400
+        return jsonify({'error': '用户名和密码不能为空'}), 400
 
-    # 检查用户名是否已存在
     if User.query.filter_by(username=username).first():
-        return jsonify({'error': '有老登比你先来一步，try another user name'}), 409 # 409 Conflict
+        return jsonify({'error': '该用户名已被注册'}), 409
 
-    # 创建新用户实例 (暂时用明文密码)
     new_user = User(username=username, password=password)
-    
-    # 添加到数据库会话并提交
     db.session.add(new_user)
     db.session.commit()
 
-    return jsonify({'message': '欢迎加入我们,welcome to our family', 'user': new_user.to_dict()}), 201
+    return jsonify({'message': '注册成功！', 'user': new_user.to_dict()}), 201
 
-
-# --- 新增：登录 API ---
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -76,74 +75,113 @@ def login():
     password = data.get('password')
 
     if not username or not password:
-        return jsonify({'error': 'Please enter user name and secret key'}), 400
+        return jsonify({'error': '请输入用户名和密码'}), 400
 
     user = User.query.filter_by(username=username).first()
 
+    # 注意：这里是明文密码比较，仅用于演示。生产环境应使用哈希密码。
     if user and user.password == password:
         token = jwt.encode({
             'user_id': user.id,
-            'username': user.username, # 【最佳实践】把username也放进token里
-            'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+            'username': user.username,
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24) # Token有效期24小时
         }, app.config['SECRET_KEY'], algorithm='HS256')
         
-        # 【关键修改】直接返回 token 和 username，而不是嵌套的 user 对象
         return jsonify({
-            'message': 'Here we go baby!',
+            'message': '登录成功！',
             'token': token,
-            'username': user.username  # <--- 直接把 username 放在这里！
+            'username': user.username
         })
     else:
-        return jsonify({'error': 'error,give another try baby!'}), 401
+        return jsonify({'error': '用户名或密码错误'}), 401
 
-# --- 保留的测试和旧的 todos API ---
+
+# --- 5. 【新增】API 代理服务 ---
+# 这个部分是解决您问题的核心
+
+# --- 5.1 DeepL 翻译代理 ---
+@app.route('/api/deepl-translate', methods=['POST'])
+def deepl_translate_proxy():
+    api_key = os.environ.get('DEEPL_API_KEY')
+    if not api_key:
+        return jsonify({'error': '服务器未配置 DeepL API Key'}), 500
+
+    data = request.get_json()
+    text_to_translate = data.get('text')
+    target_lang = data.get('target_lang', 'ZH')
+
+    if not text_to_translate:
+        return jsonify({'error': '缺少需要翻译的文本'}), 400
+
+    try:
+        response = requests.post(
+            'https://api-free.deepl.com/v2/translate',
+            headers={'Authorization': f'DeepL-Auth-Key {api_key}'},
+            json={'text': [text_to_translate], 'target_lang': target_lang}
+        )
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.exceptions.RequestException as e:
+        print(f"请求 DeepL API 时发生错误: {e}")
+        return jsonify({'error': '请求翻译服务失败'}), 502
+
+# --- 5.2 DeepSeek 聊天代理 ---
+@app.route('/api/deepseek-chat', methods=['POST'])
+def deepseek_chat_proxy():
+    api_key = os.environ.get('DEEPSEEK_API_KEY')
+    if not api_key:
+        return jsonify({'error': '服务器未配置 DeepSeek API Key'}), 500
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': '缺少请求体'}), 400
+
+    try:
+        response = requests.post(
+            'https://api.deepseek.com/chat/completions',
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            },
+            json=data # 直接转发前端发来的JSON数据
+        )
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.exceptions.RequestException as e:
+        print(f"请求 DeepSeek API 时发生错误: {e}")
+        return jsonify({'error': '请求 AI 服务失败'}), 502
+
+
+# --- 6. 测试与管理 API ---
+
 @app.route('/test_db')
 def test_db():
+    """测试数据库连接是否正常。"""
     try:
-        db.session.query(User).all() 
-        return "数据库连接成功！User 表也已成功映射！"
+        user_count = db.session.query(User.id).count()
+        return f"数据库连接成功！当前共有 {user_count} 位用户。"
     except Exception as e:
-        return f"数据库连接失败: {e}"
-
-todos = [] # 旧的 todos 我们暂时不动它，之后会改造
-@app.route('/api/todos', methods=['GET', 'POST'])
-def handle_todos():
-    if request.method == 'POST':
-        data = request.get_json()
-        new_todo = data.get('text')
-        if new_todo:
-            todos.append(new_todo)
-            return jsonify(todos), 201
-        return jsonify({'error': 'Todo text is required'}), 400
-    else:
-        return jsonify(todos)
-# ------------------------------------------------------------------
-# 警告：这是一个临时的、用于重置数据库的超级管理员接口
-# ------------------------------------------------------------------
+        return f"数据库连接或查询失败: {e}", 500
+        
 @app.route('/admin/reset-database/areyousure/<secret_key>')
 def reset_database(secret_key):
-    # 设置一个简单的密码，防止被意外触发
-    # 在真实项目中，这个密码应该更复杂或来自环境变量
-    if secret_key != "my_secret_reset_word":
+    """【危险操作】重置数据库，仅用于开发调试。"""
+    # 从环境变量获取重置密码，增强安全性
+    reset_word = os.environ.get('RESET_SECRET_WORD', 'my_default_reset_word')
+    if secret_key != reset_word:
         return jsonify({"error": "密码错误，无法执行危险操作"}), 403
 
     try:
         with app.app_context():
-            # 先删除所有表
             db.drop_all()
-            # 再根据最新的模型创建所有表
             db.create_all()
-        
-        # 返回成功信息
-        return jsonify({"message": "数据库已成功重置！所有表已根据最新模型重建。"}), 200
-
+        return jsonify({"message": "数据库已成功重置！"}), 200
     except Exception as e:
-        # 如果出错，返回错误信息
         return jsonify({"error": f"重置数据库时发生错误: {str(e)}"}), 500
 
-
-
+# --- 7. 启动应用 ---
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    # Render会通过Gunicorn启动，这里主要用于本地开发
+    port = int(os.environ.get('PORT', 5001)) # 使用5001以避免和前端常用端口冲突
+    app.run(host='0.0.0.0', port=port, debug=True) # 本地开启debug模式
 
