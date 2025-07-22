@@ -78,25 +78,23 @@ def login():
     if not username or not password:
         return jsonify({'error': 'Please enter user name and secret key'}), 400
 
-    # 在数据库中查找用户
     user = User.query.filter_by(username=username).first()
 
-    # 验证用户是否存在以及密码是否匹配
-    if user and user.password == password: # 暂时直接比较明文密码
-        # 登录成功，生成 JWT
+    if user and user.password == password:
         token = jwt.encode({
             'user_id': user.id,
-            'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24) # Token有效期24小时
+            'username': user.username, # 【最佳实践】把username也放进token里
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
         }, app.config['SECRET_KEY'], algorithm='HS256')
         
+        # 【关键修改】直接返回 token 和 username，而不是嵌套的 user 对象
         return jsonify({
             'message': 'Here we go baby!',
             'token': token,
-            'user': user.to_dict()
+            'username': user.username  # <--- 直接把 username 放在这里！
         })
     else:
-        return jsonify({'error': 'error,give another try baby!'}), 401 # 401 Unauthorized
-
+        return jsonify({'error': 'error,give another try baby!'}), 401
 
 # --- 保留的测试和旧的 todos API ---
 @app.route('/test_db')
