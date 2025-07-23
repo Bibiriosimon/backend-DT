@@ -287,6 +287,12 @@ def submit_feedback():
 
     # 4. 返回成功信息
     return jsonify({'message': '感谢您的反馈！我们已经收到啦！'}), 201
+@app.route('/api/test-deploy', methods=['GET'])
+def test_deploy_route():
+    return jsonify({
+        'message': '新代码部署成功！这个测试路由正在工作！',
+        'timestamp': datetime.datetime.utcnow().isoformat()
+    })
 # --- 8. API 代理服务 (省略以保持简洁) ---
 @app.route('/api/deepl-translate', methods=['POST'])
 def deepl_translate_proxy():
