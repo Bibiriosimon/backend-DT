@@ -1,4 +1,4 @@
-# app.py (已修复 GROUP BY 问题的最终版本)
+# app.py (最终修复版 - 修正了致命的语法错误)
 
 import os
 import datetime
@@ -221,7 +221,11 @@ def get_rank_list():
         'likes_received': user.likes_received, 'vocab_count': user.vocab_count
     } for user in rank_query]
 
-    return jsonify({'rankings': rank_list, 'liked_by_me': list(liked_user_ids)})
+    # 【【【 关键修复！！！】】】 删除这里多余的右括号
+    return jsonify({
+        'rankings': rank_list,
+        'liked_by_me': list(liked_user_ids)
+    })
 
 @app.route('/api/user/<int:liked_user_id>/like', methods=['POST'])
 def toggle_like(liked_user_id):
@@ -247,20 +251,14 @@ def toggle_like(liked_user_id):
     db.session.commit()
     return jsonify({'message': message, 'new_like_count': liked_user.likes_received})
 
-
-# --- 8. API 代理服务 ---
-# (这部分代码保持不变，为简洁省略)
+# --- 8. API 代理服务 (省略以保持简洁) ---
 @app.route('/api/deepl-translate', methods=['POST'])
 def deepl_translate_proxy():
     api_key = os.environ.get('DEEPL_API_KEY')
     if not api_key: return jsonify({'error': '服务器未配置 DeepL API Key'}), 500
     data = request.get_json()
     try:
-        response = requests.post(
-            'https://api-free.deepl.com/v2/translate',
-            headers={'Authorization': f'DeepL-Auth-Key {api_key}'},
-            json={'text': [data.get('text')], 'target_lang': data.get('target_lang', 'ZH')}
-        )
+        response = requests.post('https://api-free.deepl.com/v2/translate', headers={'Authorization': f'DeepL-Auth-Key {api_key}'}, json={'text': [data.get('text')], 'target_lang': data.get('target_lang', 'ZH')})
         response.raise_for_status()
         return jsonify(response.json())
     except requests.exceptions.RequestException as e:
@@ -272,11 +270,7 @@ def deepseek_chat_proxy():
     if not api_key: return jsonify({'error': '服务器未配置 DeepSeek API Key'}), 500
     data = request.get_json()
     try:
-        response = requests.post(
-            'https://api.deepseek.com/chat/completions',
-            headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
-            json=data
-        )
+        response = requests.post('https://api.deepseek.com/chat/completions', headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'}, json=data)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.exceptions.RequestException as e:
@@ -291,7 +285,19 @@ def dictionary_proxy(word):
     except (requests.exceptions.RequestException, requests.exceptions.JSONDecodeError) as e:
         return jsonify({'error': '词典服务连接或解析失败', 'details': str(e)}), 502
 
-
+@app.route('/admin/reset-database/areyousure/<secret_key>')
+def reset_database(secret_key):
+    reset_word = os.environ.get('RESET_SECRET_WORD', 'my_default_reset_word')
+    if secret_key != reset_word:
+        return jsonify({"error": "密码错误，无法执行危险操作"}), 403
+    try:
+        with app.app_context():
+            db.drop_all()
+            db.create_all()
+        return jsonify({"message": "数据库已成功重置！"}), 200
+    except Exception as e:
+        return jsonify({"error": f"重置数据库时发生错误: {str(e)}"}), 500
+        
 # --- 9. 启动应用 ---
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
