@@ -1,13 +1,13 @@
-# app.py (已添加 RANK 和 LIKE 功能的后端框架)
+# app.py (已修复 GROUP BY 问题的最终版本)
 
 import os
 import datetime
 import jwt
 import requests
-from flask import Flask,jsonify, request,session
+from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, desc # [新增] 导入 func 和 desc 用于聚合查询和排序
+from sqlalchemy import func, desc
 
 # --- 1. 初始化和配置 ---
 app = Flask(__name__)
@@ -25,38 +25,28 @@ db = SQLAlchemy(app)
 
 
 # --- 2. 数据模型 ---
-# [修改] User 模型 - 新增 likes_received 字段
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password = db.Column(db.String(120), nullable=False)
-    # 新增字段：收到的点赞数，默认为0
     likes_received = db.Column(db.Integer, nullable=False, default=0)
     
     def to_dict(self):
         return {'id': self.id, 'username': self.username}
 
-# [新增] Like 模型 - 用于记录点赞关系
 class Like(db.Model):
     __tablename__ = 'likes'
     id = db.Column(db.Integer, primary_key=True)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-    
-    # 点赞者 (谁点的赞)
     liker_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    # 被点赞者 (给谁点的赞)
     liked_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-
-    # 复合唯一约束，确保一个用户只能给另一个人点赞一次
     __table_args__ = (db.UniqueConstraint('liker_id', 'liked_user_id', name='_liker_liked_user_uc'),)
-
 
 class Note(db.Model):
     __tablename__ = 'notes'
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
-    # [新增] summary字段，用于存储AI生成的摘要
     summary = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
@@ -66,8 +56,8 @@ class Note(db.Model):
         return {
             'id': self.id,
             'content': self.content,
-            'summary': self.summary, # [新增]
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') # [修改] 统一时间格式
+            'summary': self.summary,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S')
         }
 
 class Vocab(db.Model):
@@ -113,13 +103,9 @@ def get_user_from_token():
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-    if not username or not password:
-        return jsonify({'message': '用户名和密码不能为空'}), 400
-    if User.query.filter_by(username=username).first():
-        return jsonify({'message': '该用户名已被注册'}), 409
-    # 在生产环境中，应该对密码进行哈希处理
+    username, password = data.get('username'), data.get('password')
+    if not username or not password: return jsonify({'message': '用户名和密码不能为空'}), 400
+    if User.query.filter_by(username=username).first(): return jsonify({'message': '该用户名已被注册'}), 409
     new_user = User(username=username, password=password)
     db.session.add(new_user)
     db.session.commit()
@@ -128,35 +114,26 @@ def register():
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
+    username, password = data.get('username'), data.get('password')
     user = User.query.filter_by(username=username).first()
     if user and user.password == password:
         token = jwt.encode({
-            'user_id': user.id,
-            'username': user.username,
+            'user_id': user.id, 'username': user.username,
             'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
         }, app.config['SECRET_KEY'], algorithm='HS256')
         return jsonify({
-            'message': '登录成功！', 
-            'token': token, 
-            'username': user.username,
-            'likes_received': user.likes_received # [新增] 返回用户的点赞数
+            'message': '登录成功！', 'token': token, 'username': user.username,
+            'likes_received': user.likes_received
         })
     else:
         return jsonify({'message': '用户名或密码错误'}), 401
-        
-# [新增] 获取当前用户统计信息的路由
+
 @app.route('/api/user/stats', methods=['GET'])
 def get_user_stats():
     user_info = get_user_from_token()
-    if not user_info:
-        return jsonify({'error': '未授权或Token无效'}), 401
-    
+    if not user_info: return jsonify({'error': '未授权'}), 401
     user = User.query.get(user_info['user_id'])
-    if not user:
-        return jsonify({'error': '用户不存在'}), 404
-        
+    if not user: return jsonify({'error': '用户不存在'}), 404
     return jsonify({'likes_received': user.likes_received})
 
 
@@ -166,11 +143,9 @@ def add_note():
     user_info = get_user_from_token()
     if not user_info: return jsonify({'error': '未授权'}), 401
     data = request.get_json()
-    content = data.get('content')
-    summary = data.get('summary') # [新增] 获取summary
+    content, summary = data.get('content'), data.get('summary')
     if not content: return jsonify({'error': '内容不能为空'}), 400
-    
-    new_note = Note(content=content, summary=summary, user_id=user_info['user_id']) # [新增] 保存summary
+    new_note = Note(content=content, summary=summary, user_id=user_info['user_id'])
     db.session.add(new_note)
     db.session.commit()
     return jsonify({'message': '笔记已保存', 'note': new_note.to_dict()}), 201
@@ -179,13 +154,9 @@ def add_note():
 def handle_single_note(note_id):
     user_info = get_user_from_token()
     if not user_info: return jsonify({'error': '未授权'}), 401
-    
     note = Note.query.filter_by(id=note_id, user_id=user_info['user_id']).first()
     if not note: return jsonify({'error': '笔记不存在或无权访问'}), 404
-
-    if request.method == 'GET':
-        return jsonify(note.to_dict())
-        
+    if request.method == 'GET': return jsonify(note.to_dict())
     if request.method == 'DELETE':
         db.session.delete(note)
         db.session.commit()
@@ -193,7 +164,6 @@ def handle_single_note(note_id):
 
 @app.route('/api/notes', methods=['GET'])
 def get_notes():
-    # ... (此函数无需修改)
     user_info = get_user_from_token()
     if not user_info: return jsonify({'error': '未授权'}), 401
     notes = Note.query.filter_by(user_id=user_info['user_id']).order_by(desc(Note.created_at)).all()
@@ -201,128 +171,85 @@ def get_notes():
 
 @app.route('/api/vocab', methods=['POST'])
 def add_vocab():
-    # ... (此函数无需修改)
     user_info = get_user_from_token()
     if not user_info: return jsonify({'error': '未授权'}), 401
     data = request.get_json()
-    # ... (rest of the function)
-    if not data or not data.get('word') or not data.get('meaning'):
-        return jsonify({'error': '缺少必要数据'}), 400
-
-    existing_vocab = Vocab.query.filter_by(user_id=user_info['user_id'], word=data['word']).first()
-    if existing_vocab:
-        return jsonify({'message': '单词已在您的单词本中'}), 200
-
-    new_vocab = Vocab(
-        word=data['word'],
-        phonetic=data.get('phonetic'),
-        meaning=data['meaning'],
-        user_id=user_info['user_id']
-    )
+    if not data or not data.get('word') or not data.get('meaning'): return jsonify({'error': '缺少必要数据'}), 400
+    if Vocab.query.filter_by(user_id=user_info['user_id'], word=data['word']).first(): return jsonify({'message': '单词已在您的单词本中'}), 200
+    new_vocab = Vocab(word=data['word'], phonetic=data.get('phonetic'), meaning=data['meaning'], user_id=user_info['user_id'])
     db.session.add(new_vocab)
     db.session.commit()
-    # 返回包含新ID的完整对象
     return jsonify({'message': '单词已添加', 'vocab': new_vocab.to_dict()}), 201
 
 @app.route('/api/vocab/<int:vocab_id>', methods=['DELETE'])
 def delete_vocab(vocab_id):
     user_info = get_user_from_token()
     if not user_info: return jsonify({'error': '未授权'}), 401
-    
     vocab_item = Vocab.query.filter_by(id=vocab_id, user_id=user_info['user_id']).first()
     if not vocab_item: return jsonify({'error': '单词不存在或无权访问'}), 404
-        
     db.session.delete(vocab_item)
     db.session.commit()
     return jsonify({'message': '单词已删除'})
 
-
 @app.route('/api/vocab', methods=['GET'])
 def get_vocab():
-    # ... (此函数无需修改)
     user_info = get_user_from_token()
     if not user_info: return jsonify({'error': '未授权'}), 401
     vocabs = Vocab.query.filter_by(user_id=user_info['user_id']).order_by(Vocab.word).all()
     return jsonify([v.to_dict() for v in vocabs])
 
-# --- 7. [新增] 排名与点赞 API ---
+# --- 7. 排名与点赞 API ---
 @app.route('/api/rank', methods=['GET'])
 def get_rank_list():
     user_info = get_user_from_token()
     if not user_info: return jsonify({'error': '未授权'}), 401
     current_user_id = user_info['user_id']
-
-    # 1. 查询所有用户及其单词数和点赞数
-    # 使用 outerjoin 确保单词数为0的用户也被包含
-    # 使用 func.count(Vocab.id) 来统计每个用户的单词数
+    
     rank_query = db.session.query(
-        User.id,
-        User.username,
-        User.likes_received,
+        User.id, User.username, User.likes_received,
         func.count(Vocab.id).label('vocab_count')
     ).outerjoin(Vocab, User.id == Vocab.user_id)\
-     .group_by(User.id)\
+     .group_by(User.id, User.username, User.likes_received)\
      .order_by(desc('vocab_count'), desc('likes_received'))\
      .all()
 
-    # 2. 查询当前登录用户已经点赞过的所有用户ID
     likes_by_me = Like.query.filter_by(liker_id=current_user_id).all()
     liked_user_ids = {like.liked_user_id for like in likes_by_me}
 
-    # 3. 格式化结果
-    rank_list = []
-    for user in rank_query:
-        rank_list.append({
-            'user_id': user.id,
-            'username': user.username,
-            'likes_received': user.likes_received,
-            'vocab_count': user.vocab_count
-        })
+    rank_list = [{
+        'user_id': user.id, 'username': user.username,
+        'likes_received': user.likes_received, 'vocab_count': user.vocab_count
+    } for user in rank_query]
 
-    return jsonify({
-        'rankings': rank_list,
-        'liked_by_me': list(liked_user_ids) # 返回一个当前用户已点赞的ID列表
-    })
+    return jsonify({'rankings': rank_list, 'liked_by_me': list(liked_user_ids)})
 
 @app.route('/api/user/<int:liked_user_id>/like', methods=['POST'])
 def toggle_like(liked_user_id):
     user_info = get_user_from_token()
     if not user_info: return jsonify({'error': '未授权'}), 401
     liker_id = user_info['user_id']
+    if liker_id == liked_user_id: return jsonify({'error': '不能给自己点赞'}), 400
     
-    # 不允许自己给自己点赞
-    if liker_id == liked_user_id:
-        return jsonify({'error': '不能给自己点赞'}), 400
-
     liked_user = User.query.get(liked_user_id)
-    if not liked_user:
-        return jsonify({'error': '被点赞的用户不存在'}), 404
+    if not liked_user: return jsonify({'error': '被点赞的用户不存在'}), 404
 
-    # 检查是否已经点过赞
     existing_like = Like.query.filter_by(liker_id=liker_id, liked_user_id=liked_user_id).first()
-
     if existing_like:
-        # 如果已存在，则取消点赞
         db.session.delete(existing_like)
         liked_user.likes_received = max(0, liked_user.likes_received - 1)
         message = '取消点赞成功'
     else:
-        # 如果不存在，则添加点赞
         new_like = Like(liker_id=liker_id, liked_user_id=liked_user_id)
         db.session.add(new_like)
         liked_user.likes_received += 1
         message = '点赞成功'
     
     db.session.commit()
-    
-    return jsonify({
-        'message': message,
-        'new_like_count': liked_user.likes_received
-    })
+    return jsonify({'message': message, 'new_like_count': liked_user.likes_received})
 
 
 # --- 8. API 代理服务 ---
-# ... (所有代理服务函数无需修改，保持原样)
+# (这部分代码保持不变，为简洁省略)
 @app.route('/api/deepl-translate', methods=['POST'])
 def deepl_translate_proxy():
     api_key = os.environ.get('DEEPL_API_KEY')
@@ -368,4 +295,4 @@ def dictionary_proxy(word):
 # --- 9. 启动应用 ---
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
-    app.run(host='0.0.0.0', port=port, debug=True) # 本地调试时可以开启 debug=True
+    app.run(host='0.0.0.0', port=port, debug=True)
