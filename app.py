@@ -1,5 +1,3 @@
-# app.py (最终修复版 - 修正了致命的语法错误)
-
 import os
 import datetime
 import jwt
@@ -77,7 +75,23 @@ class Vocab(db.Model):
             'phonetic': self.phonetic,
             'meaning': self.meaning 
         }
+class Feedback(db.Model):
+    __tablename__ = 'feedbacks'
+    id = db.Column(db.Integer, primary_key=True)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    
+    # 我们把反馈和用户关联起来，这样就知道是谁提的建议了
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user = db.relationship('User', backref=db.backref('feedbacks', lazy=True))
 
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'content': self.content,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'user_id': self.user_id
+        }
 # --- 3. 数据库表创建 ---
 with app.app_context():
     db.create_all()
@@ -250,7 +264,29 @@ def toggle_like(liked_user_id):
     
     db.session.commit()
     return jsonify({'message': message, 'new_like_count': liked_user.likes_received})
+@app.route('/api/feedback', methods=['POST'])
+def submit_feedback():
+    # 1. 验证用户身份
+    user_info = get_user_from_token()
+    if not user_info:
+        return jsonify({'error': '未授权，请先登录'}), 401
 
+    # 2. 获取前端发来的数据
+    data = request.get_json()
+    content = data.get('content')
+    if not content or not content.strip():
+        return jsonify({'error': '反馈内容不能为空'}), 400
+
+    # 3. 创建新的Feedback记录并存入数据库
+    new_feedback = Feedback(
+        content=content,
+        user_id=user_info['user_id']
+    )
+    db.session.add(new_feedback)
+    db.session.commit()
+
+    # 4. 返回成功信息
+    return jsonify({'message': '感谢您的反馈！我们已经收到啦！'}), 201
 # --- 8. API 代理服务 (省略以保持简洁) ---
 @app.route('/api/deepl-translate', methods=['POST'])
 def deepl_translate_proxy():
