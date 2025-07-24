@@ -195,16 +195,45 @@ def add_vocab():
     db.session.commit()
     return jsonify({'message': '单词已添加', 'vocab': new_vocab.to_dict()}), 201
 
-@app.route('/api/vocab/<int:vocab_id>', methods=['DELETE'])
-def delete_vocab(vocab_id):
+@app.route('/api/vocab/<int:vocab_id>', methods=['PUT', 'DELETE'])
+def handle_single_vocab(vocab_id):
+    # 1. 验证用户身份
     user_info = get_user_from_token()
-    if not user_info: return jsonify({'error': '未授权'}), 401
-    vocab_item = Vocab.query.filter_by(id=vocab_id, user_id=user_info['user_id']).first()
-    if not vocab_item: return jsonify({'error': '单词不存在或无权访问'}), 404
-    db.session.delete(vocab_item)
-    db.session.commit()
-    return jsonify({'message': '单词已删除'})
+    if not user_info:
+        return jsonify({'error': '未授权'}), 401
 
+    # 2. 从数据库中查找属于该用户的特定单词
+    vocab_item = Vocab.query.filter_by(id=vocab_id, user_id=user_info['user_id']).first()
+    if not vocab_item:
+        return jsonify({'error': '单词不存在或无权访问'}), 404
+
+    # 3. 如果是 PUT 请求，则执行更新逻辑
+    if request.method == 'PUT':
+        try:
+            data = request.get_json()
+            # 检查前端是否发送了 'word' 字段，如果有就更新它
+            if 'word' in data:
+                vocab_item.word = data['word']
+            
+            # (这个接口将来还可以扩展，比如更新 phonetic 或 meaning)
+            # if 'phonetic' in data:
+            #     vocab_item.phonetic = data['phonetic']
+
+            db.session.commit()
+            return jsonify({'message': '单词更新成功'}), 200
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': f'更新失败: {str(e)}'}), 500
+
+    # 4. 如果是 DELETE 请求，则执行删除逻辑
+    if request.method == 'DELETE':
+        try:
+            db.session.delete(vocab_item)
+            db.session.commit()
+            return jsonify({'message': '单词已删除'})
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': f'删除失败: {str(e)}'}), 500
 @app.route('/api/vocab', methods=['GET'])
 def get_vocab():
     user_info = get_user_from_token()
