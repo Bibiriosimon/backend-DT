@@ -409,31 +409,38 @@ def get_plaza_topics():
 
 # 4. 发布新帖子
 @app.route('/plaza/topics', methods=['POST'])
+@app.route('/plaza/topics', methods=['POST'])
 def publish_plaza_topic():
+    # 从 token 获取当前用户
+    user_info = get_user_from_token()
+    if not user_info:
+        return jsonify({'error': '未授权，请先登录'}), 401
+
     data = request.get_json()
     title = data.get('title')
     content = data.get('content')
-    author_id = data.get('author_id')
-    # 图片功能我们先留空
-    image_url = data.get('image_url', None) 
+    image_url = data.get('image_url', None)
 
-    if not title or not content or not author_id:
-        return jsonify({"error": "标题、内容和作者ID均不能为空"}), 400
+    if not title or not content:
+        return jsonify({"error": "标题和内容不能为空"}), 400
+
+    author_id = user_info['user_id']  # 自动填充用户ID
 
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     cur.execute(
         "INSERT INTO plaza_topics (title, content, author_id, image_url) VALUES (%s, %s, %s, %s) RETURNING id",
         (title, content, author_id, image_url)
     )
     topic_id = cur.fetchone()[0]
-    
+
     conn.commit()
     cur.close()
     conn.close()
-    
+
     return jsonify({"message": "发布成功！", "topic_id": topic_id}), 201
+
        
 # --- 9. 启动应用 ---
 if __name__ == '__main__':
