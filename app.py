@@ -6,7 +6,7 @@ from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func, desc
-
+import psycopg2.extras
 # --- 1. 初始化和配置 ---
 app = Flask(__name__)
 CORS(app, supports_credentials=True) 
@@ -368,7 +368,73 @@ def reset_database(secret_key):
         return jsonify({"message": "数据库已成功重置！"}), 200
     except Exception as e:
         return jsonify({"error": f"重置数据库时发生错误: {str(e)}"}), 500
-        
+# (确保你的import语句里有这个，psycopg2.extras，如果没有，请加上)
+import psycopg2.extras # 在文件顶部添加这个
+
+# ... 你之前的 /register 和 /login 代码在这里 ...
+
+# --- Plaza API 端点 ---
+
+# 3. 获取所有 Plaza 帖子
+@app.route('/plaza/topics', methods=['GET'])
+def get_plaza_topics():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    # 我们使用 LEFT JOIN 来同时获取帖子的作者名
+    cur.execute("""
+        SELECT 
+            pt.id, 
+            pt.title, 
+            pt.content, 
+            pt.image_url, 
+            pt.created_at, 
+            u.username AS author_username 
+        FROM 
+            plaza_topics pt
+        LEFT JOIN 
+            users u ON pt.author_id = u.id
+        ORDER BY 
+            pt.created_at DESC; 
+    """) # 按时间倒序排列，最新的在前面
+    
+    topics = cur.fetchall()
+    
+    cur.close()
+    conn.close()
+    
+    # 将查询结果（是对象列表）转换为JSON格式返回
+    # a little bit of magic to handle datetime objects
+    return jsonify([dict(topic) for topic in topics])
+
+# 4. 发布新帖子
+@app.route('/plaza/topics', methods=['POST'])
+def publish_plaza_topic():
+    data = request.get_json()
+    title = data.get('title')
+    content = data.get('content')
+    author_id = data.get('author_id')
+    # 图片功能我们先留空
+    image_url = data.get('image_url', None) 
+
+    if not title or not content or not author_id:
+        return jsonify({"error": "标题、内容和作者ID均不能为空"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute(
+        "INSERT INTO plaza_topics (title, content, author_id, image_url) VALUES (%s, %s, %s, %s) RETURNING id",
+        (title, content, author_id, image_url)
+    )
+    topic_id = cur.fetchone()[0]
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return jsonify({"message": "发布成功！", "topic_id": topic_id}), 201
+       
 # --- 9. 启动应用 ---
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
