@@ -108,6 +108,46 @@ def get_user_from_token():
         return {'user_id': data['user_id'], 'username': data['username']}
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         return None
+# --- 2. 数据模型 ---
+# ... 你已有的 User, Like, Note, Vocab, Feedback 模型 ...
+
+# 【【【新增代码】】】
+# Plaza 帖子的模型
+class PlazaTopic(db.Model):
+    __tablename__ = 'plaza_topics'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(255), nullable=False)
+    content = db.Column(db.Text)
+    image_url = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    
+    # 【关键】使用 username 作为外键
+    author_username = db.Column(db.String(80), db.ForeignKey('users.username', onupdate='CASCADE', ondelete='CASCADE'), nullable=False)
+    
+    # 建立关系，这样可以方便地通过 topic.author 访问到 User 对象
+    author = db.relationship('User', backref=db.backref('plaza_topics', lazy=True, cascade="all, delete-orphan"))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'content': self.content,
+            'image_url': self.image_url,
+            'created_at': self.created_at.isoformat() + 'Z', # 使用ISO格式，前端兼容性更好
+            'author_username': self.author_username
+        }
+
+# Plaza 评论的模型 (如果以后要加评论功能，可以先放着)
+# class PlazaComment(db.Model):
+#     __tablename__ = 'plaza_comments'
+#     id = db.Column(db.Integer, primary_key=True)
+#     content = db.Column(db.Text, nullable=False)
+#     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+#     author_username = db.Column(db.String(80), db.ForeignKey('users.username', onupdate='CASCADE', ondelete='CASCADE'), nullable=False)
+#     topic_id = db.Column(db.Integer, db.ForeignKey('plaza_topics.id', ondelete='CASCADE'), nullable=False)
+#     
+#     author = db.relationship('User', backref=db.backref('plaza_comments', lazy=True))
+#     topic = db.relationship('PlazaTopic', backref=db.backref('comments', lazy=True, cascade="all, delete-orphan"))
 
 # =======================================================
 # ==================== API 路由 =========================
@@ -378,37 +418,17 @@ import psycopg2.extras # 在文件顶部添加这个
 # 3. 获取所有 Plaza 帖子
 @app.route('/plaza/topics', methods=['GET'])
 def get_plaza_topics():
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
-    # 我们使用 LEFT JOIN 来同时获取帖子的作者名
-    cur.execute("""
-        SELECT 
-            pt.id, 
-            pt.title, 
-            pt.content, 
-            pt.image_url, 
-            pt.created_at, 
-            u.username AS author_username 
-        FROM 
-            plaza_topics pt
-        LEFT JOIN 
-            users u ON pt.author_id = u.id
-        ORDER BY 
-            pt.created_at DESC; 
-    """) # 按时间倒序排列，最新的在前面
-    
-    topics = cur.fetchall()
-    
-    cur.close()
-    conn.close()
-    
-    # 将查询结果（是对象列表）转换为JSON格式返回
-    # a little bit of magic to handle datetime objects
-    return jsonify([dict(topic) for topic in topics])
+    try:
+        # 使用 SQLAlchemy 查询，并按时间倒序
+        topics = PlazaTopic.query.order_by(PlazaTopic.created_at.desc()).all()
+        # 将查询到的对象列表转换为字典列表
+        return jsonify([topic.to_dict() for topic in topics])
+    except Exception as e:
+        # 捕获任何可能的数据库错误，并返回一个清晰的JSON错误信息
+        print(f"Error fetching plaza topics: {e}") # 在服务器日志中打印详细错误
+        return jsonify({'error': '获取帖子列表时发生服务器错误'}), 500
 
-# 4. 发布新帖子
-@app.route('/plaza/topics', methods=['POST'])
+# 发布新帖子
 @app.route('/plaza/topics', methods=['POST'])
 def publish_plaza_topic():
     # 从 token 获取当前用户
@@ -419,27 +439,31 @@ def publish_plaza_topic():
     data = request.get_json()
     title = data.get('title')
     content = data.get('content')
-    image_url = data.get('image_url', None)
+    image_url = data.get('image_url') # 如果没有，默认为 None
 
     if not title or not content:
         return jsonify({"error": "标题和内容不能为空"}), 400
 
-    author_id = user_info['user_id']  # 自动填充用户ID
+    try:
+        # 创建一个新的 PlazaTopic 对象
+        new_topic = PlazaTopic(
+            title=title,
+            content=content,
+            image_url=image_url,
+            author_username=user_info['username']  # 【关键】从token中获取用户名
+        )
+        
+        # 使用 SQLAlchemy 的 session 来添加和提交
+        db.session.add(new_topic)
+        db.session.commit()
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+        # 返回成功信息和新帖子的数据
+        return jsonify(new_topic.to_dict()), 201
 
-    cur.execute(
-        "INSERT INTO plaza_topics (title, content, author_id, image_url) VALUES (%s, %s, %s, %s) RETURNING id",
-        (title, content, author_id, image_url)
-    )
-    topic_id = cur.fetchone()[0]
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    return jsonify({"message": "发布成功！", "topic_id": topic_id}), 201
+    except Exception as e:
+        db.session.rollback() # 如果发生错误，回滚事务
+        print(f"Error publishing plaza topic: {e}")
+        return jsonify({'error': '发布帖子时发生服务器错误'}), 500
 
        
 # --- 9. 启动应用 ---
