@@ -518,22 +518,21 @@ def get_topic_details(topic_id):
 
 # 为帖子添加新评论
 @app.route('/api/plaza/topics/<int:topic_id>/comments', methods=['POST'])
-def post_comment(topic_id):
-    user_info = get_user_from_token()
-    if not user_info:
-        return jsonify({'error': '未授权，请先登录'}), 401
+ try:
+        user_info = get_user_from_token()
+        if not user_info:
+            return jsonify({'error': '未授权，请先登录'}), 401
 
-    data = request.get_json()
-    content = data.get('content')
-    if not content or not content.strip():
-        return jsonify({"error": "评论内容不能为空"}), 400
+        data = request.get_json()
+        content = data.get('content')
+        if not content or not content.strip():
+            return jsonify({"error": "评论内容不能为空"}), 400
 
-    # 检查帖子是否存在
-    topic = PlazaTopic.query.get(topic_id)
-    if not topic:
-        return jsonify({"error": "帖子不存在"}), 404
+        # 检查帖子是否存在
+        topic = PlazaTopic.query.get(topic_id)
+        if not topic:
+            return jsonify({"error": "帖子不存在"}), 404
 
-    try:
         new_comment = PlazaComment(
             content=content,
             topic_id=topic_id,
@@ -543,8 +542,9 @@ def post_comment(topic_id):
         db.session.commit()
         return jsonify(new_comment.to_dict()), 201
     except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': '评论失败，服务器错误'}), 500
+        db.session.rollback() # 发生错误时回滚数据库操作，非常重要！
+        print(f"Error in post_comment: {e}") # 在服务器日志中打印错误，方便排查
+        return jsonify({'error': '评论失败，服务器内部错误'}), 500
 
 # 点赞一个评论（增加评论作者的总获赞数）
 @app.route('/api/plaza/comments/<int:comment_id>/like', methods=['POST'])
@@ -617,42 +617,46 @@ def like_user(user_id):
         return jsonify({'error': '服务器错误'}), 500
 
 # 获取与另一个用户的聊天记录
+# 获取与另一个用户的聊天记录
 @app.route('/api/chat/<int:other_user_id>', methods=['GET'])
 def get_chat_history(other_user_id):
-    user_info = get_user_from_token()
-    if not user_info:
-        return jsonify({'error': '未授权'}), 401
-    
-    current_user_id = user_info['user_id']
-    
-    # 查询两个用户之间的所有消息
-    # 条件是：(我发给他 OR 他发给我)
-    messages = ChatMessage.query.filter(
-        ((ChatMessage.sender_id == current_user_id) & (ChatMessage.receiver_id == other_user_id)) |
-        ((ChatMessage.sender_id == other_user_id) & (ChatMessage.receiver_id == current_user_id))
-    ).order_by(ChatMessage.created_at.asc()).all()
-    
-    return jsonify([message.to_dict() for message in messages])
-
+    # 【【【修改开始】】】
+    try:
+        user_info = get_user_from_token()
+        if not user_info:
+            return jsonify({'error': '未授权'}), 401
+      
+        current_user_id = user_info['user_id']
+      
+        messages = ChatMessage.query.filter(
+            ((ChatMessage.sender_id == current_user_id) & (ChatMessage.receiver_id == other_user_id)) |
+            ((ChatMessage.sender_id == other_user_id) & (ChatMessage.receiver_id == current_user_id))
+        ).order_by(ChatMessage.created_at.asc()).all()
+      
+        return jsonify([message.to_dict() for message in messages])
+    except Exception as e:
+        print(f"Error in get_chat_history: {e}")
+        return jsonify({'error': '获取聊天记录时发生服务器错误'}), 500
 # 发送聊天消息
 @app.route('/api/chat/send', methods=['POST'])
 def send_chat_message():
-    user_info = get_user_from_token()
-    if not user_info:
-        return jsonify({'error': '未授权'}), 401
-
-    data = request.get_json()
-    receiver_id = data.get('receiver_id')
-    content = data.get('content')
-
-    if not receiver_id or not content or not content.strip():
-        return jsonify({'error': '接收者ID和内容不能为空'}), 400
-
-    # 检查接收者是否存在
-    if not User.query.get(receiver_id):
-        return jsonify({'error': '接收用户不存在'}), 404
-
+    # 【【【修改开始】】】
     try:
+        user_info = get_user_from_token()
+        if not user_info:
+            return jsonify({'error': '未授权'}), 401
+
+        data = request.get_json()
+        receiver_id = data.get('receiver_id')
+        content = data.get('content')
+
+        if not receiver_id or not content or not content.strip():
+            return jsonify({'error': '接收者ID和内容不能为空'}), 400
+
+        # 检查接收者是否存在
+        if not User.query.get(receiver_id):
+            return jsonify({'error': '接收用户不存在'}), 404
+
         new_message = ChatMessage(
             sender_id=user_info['user_id'],
             receiver_id=receiver_id,
@@ -663,8 +667,8 @@ def send_chat_message():
         return jsonify(new_message.to_dict()), 201
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': '发送失败，服务器错误'}), 500
-
+        print(f"Error in send_chat_message: {e}")
+        return jsonify({'error': '发送失败，服务器内部错误'}), 500
 
        
 # --- 9. 启动应用 ---
