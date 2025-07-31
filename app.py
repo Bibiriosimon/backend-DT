@@ -161,28 +161,34 @@ class PlazaComment(db.Model):
             'topic_id': self.topic_id
         }
 # 【【【新增代码：聊天消息模型】】】
+# ==========================================================
+# ==              第一处修改：ChatMessage 模型             ==
+# ==========================================================
 class ChatMessage(db.Model):
     __tablename__ = 'chat_messages'
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
-  
-    # 关联到发送者
-    sender_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
-    # 关联到接收者
-    receiver_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    
+    # 【核心修改】使用 username 作为外键，与你的数据库表结构匹配
+    sender_username = db.Column(db.String(80), db.ForeignKey('users.username', ondelete='CASCADE'), nullable=False)
+    receiver_username = db.Column(db.String(80), db.ForeignKey('users.username', ondelete='CASCADE'), nullable=False)
 
-    # 建立关系，这里需要用 foreign_keys 来区分 sender 和 receiver
-    sender = db.relationship('User', foreign_keys=[sender_id], backref='sent_messages')
-    receiver = db.relationship('User', foreign_keys=[receiver_id], backref='received_messages')
+    # 建立关系，让 SQLAlchemy 知道如何通过 username 找到 User 对象
+    # remote_side=[User.username] 告诉 SQLAlchemy 关系的“远程”端是 User 表的 username 列
+    sender = db.relationship('User', foreign_keys=[sender_username], primaryjoin='ChatMessage.sender_username == User.username')
+    receiver = db.relationship('User', foreign_keys=[receiver_username], primaryjoin='ChatMessage.receiver_username == User.username')
 
     def to_dict(self):
+        # 在返回字典时，我们返回 username，但为了兼容性，也同时返回 id
         return {
             'id': self.id,
             'content': self.content,
             'created_at': self.created_at.isoformat() + 'Z',
-            'sender_id': self.sender_id,
-            'receiver_id': self.receiver_id
+            'sender_id': self.sender.id,             # 通过关系获取 sender 的 id
+            'receiver_id': self.receiver.id,         # 通过关系获取 receiver 的 id
+            'sender_username': self.sender_username,
+            'receiver_username': self.receiver_username
         }
 
 # =======================================================
@@ -620,27 +626,39 @@ def like_user(user_id):
 
 # 获取与另一个用户的聊天记录
 # 获取与另一个用户的聊天记录
+# ==========================================================
+# ==           第二处修改：获取聊天记录 API                ==
+# ==========================================================
 @app.route('/api/chat/<int:other_user_id>', methods=['GET'])
 def get_chat_history(other_user_id):
-    # 【【【修改开始】】】
     try:
         user_info = get_user_from_token()
         if not user_info:
             return jsonify({'error': '未授权'}), 401
     
-        current_user_id = user_info['user_id']
-    
+        current_user_username = user_info['username']
+        
+        # 【核心修改】根据 ID 找到对方用户的 username
+        other_user = User.query.get(other_user_id)
+        if not other_user:
+            return jsonify({'error': '聊天对象不存在'}), 404
+        other_user_username = other_user.username
+
+        # 【核心修改】使用 username 进行查询
         messages = ChatMessage.query.filter(
-            ((ChatMessage.sender_id == current_user_id) & (ChatMessage.receiver_id == other_user_id)) |
-            ((ChatMessage.sender_id == other_user_id) & (ChatMessage.receiver_id == current_user_id))
+            ((ChatMessage.sender_username == current_user_username) & (ChatMessage.receiver_username == other_user_username)) |
+            ((ChatMessage.sender_username == other_user_username) & (ChatMessage.receiver_username == current_user_username))
         ).order_by(ChatMessage.created_at.asc()).all()
     
         return jsonify([message.to_dict() for message in messages])
     except Exception as e:
         print(f"Error in get_chat_history: {e}")
         return jsonify({'error': '获取聊天记录时发生服务器错误'}), 500
+
 # 发送聊天消息
-# 发送聊天消息
+# ==========================================================
+# ==              第三处修改：发送消息 API                 ==
+# ==========================================================
 @app.route('/api/chat/send', methods=['POST'])
 def send_chat_message():
     try:
@@ -655,13 +673,15 @@ def send_chat_message():
         if not receiver_id or not content or not content.strip():
             return jsonify({'error': '接收者ID和内容不能为空'}), 400
 
-        # 检查接收者是否存在
-        if not User.query.get(receiver_id):
+        # 【核心修改】根据前端传来的 receiver_id 找到接收者的 User 对象
+        receiver_user = User.query.get(receiver_id)
+        if not receiver_user:
             return jsonify({'error': '接收用户不存在'}), 404
 
+        # 【核心修改】创建消息时，使用 username
         new_message = ChatMessage(
-            sender_id=user_info['user_id'],
-            receiver_id=receiver_id,
+            sender_username=user_info['username'],
+            receiver_username=receiver_user.username,
             content=content
         )
         db.session.add(new_message)
