@@ -428,7 +428,7 @@ import psycopg2.extras # 在文件顶部添加这个
 # --- Plaza API 端点 ---
 
 # 3. 获取所有 Plaza 帖子
-@app.route('/plaza/topics', methods=['GET'])
+@app.route('/api/plaza/topics', methods=['GET'])
 def get_plaza_topics():
     try:
         # 使用 SQLAlchemy 查询，并按时间倒序
@@ -441,7 +441,7 @@ def get_plaza_topics():
         return jsonify({'error': '获取帖子列表时发生服务器错误'}), 500
 
 # 发布新帖子
-@app.route('/plaza/topics', methods=['POST'])
+@app.route('/api/plaza/topics', methods=['POST'])
 def publish_plaza_topic():
     # 从 token 获取当前用户
     user_info = get_user_from_token()
