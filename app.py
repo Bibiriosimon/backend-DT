@@ -20,18 +20,38 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a-very-strong-default-secret-key-for-local-dev')
 
 db = SQLAlchemy(app)
-
+AVATAR_CHOICES = [
+    "https://api.dicebear.com/8.x/pixel-art/svg?seed=user1",
+    "https://api.dicebear.com/8.x/adventurer/svg?seed=user2",
+    "https://api.dicebear.com/8.x/miniavs/svg?seed=user3",
+    "https://api.dicebear.com/8.x/bottts/svg?seed=user4",
+    "https://api.dicebear.com/8.x/thumbs/svg?seed=user5",
+    "https://api.dicebear.com/8.x/lorelei/svg?seed=user6",
+    "https://api.dicebear.com/8.x/notionists/svg?seed=user7",
+    "https://api.dicebear.com/8.x/fun-emoji/svg?seed=user8"
+]
 
 # --- 2. 数据模型 ---
+# 【【【第二处修改：更新User模型】】】
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password = db.Column(db.String(120), nullable=False)
     likes_received = db.Column(db.Integer, nullable=False, default=0)
+    
+    # 新增 avatar_url 字段，可以为空
+    avatar_url = db.Column(db.String(255), nullable=True)
   
     def to_dict(self):
-        return {'id': self.id, 'username': self.username}
+        return {
+            'id': self.id, 
+            'username': self.username,
+            'likes_received': self.likes_received,
+            # 如果用户没头像，给一个默认的，防止前端出错
+            'avatar_url': self.avatar_url or AVATAR_CHOICES[0]
+        }
+
 
 class Like(db.Model):
     __tablename__ = 'likes'
@@ -133,8 +153,9 @@ class PlazaTopic(db.Model):
             'title': self.title,
             'content': self.content,
             'image_url': self.image_url,
-            'created_at': self.created_at.isoformat() + 'Z', # 使用ISO格式，前端兼容性更好
-            'author_username': self.author_username
+            'created_at': self.created_at.isoformat() + 'Z',
+            'author_username': self.author.username,
+            'author_avatar_url': self.author.avatar_url or AVATAR_CHOICES[0]
         }
 class PlazaComment(db.Model):
     __tablename__ = 'plaza_comments'
@@ -151,13 +172,13 @@ class PlazaComment(db.Model):
     topic = db.relationship('PlazaTopic', backref=db.backref('comments', lazy=True, cascade="all, delete-orphan"))
 
     def to_dict(self):
-        # 在返回字典时，一并返回作者的点赞数，方便前端展示
         return {
             'id': self.id,
             'content': self.content,
             'created_at': self.created_at.isoformat() + 'Z',
-            'author_username': self.author_username,
-            'author_likes': self.author.likes_received, # 通过关系直接获取作者的点赞数
+            'author_username': self.author.username,
+            'author_likes': self.author.likes_received,
+            'author_avatar_url': self.author.avatar_url or AVATAR_CHOICES[0],
             'topic_id': self.topic_id
         }
 # 【【【新增代码：聊天消息模型】】】
@@ -180,17 +201,17 @@ class ChatMessage(db.Model):
     receiver = db.relationship('User', foreign_keys=[receiver_username], primaryjoin='ChatMessage.receiver_username == User.username')
 
     def to_dict(self):
-        # 在返回字典时，我们返回 username，但为了兼容性，也同时返回 id
         return {
             'id': self.id,
             'content': self.content,
             'created_at': self.created_at.isoformat() + 'Z',
-            'sender_id': self.sender.id,             # 通过关系获取 sender 的 id
-            'receiver_id': self.receiver.id,         # 通过关系获取 receiver 的 id
-            'sender_username': self.sender_username,
-            'receiver_username': self.receiver_username
+            'sender_id': self.sender.id,
+            'receiver_id': self.receiver.id,
+            'sender_username': self.sender.username,
+            'receiver_username': self.receiver.username,
+            'sender_avatar_url': self.sender.avatar_url or AVATAR_CHOICES[0],
+            'receiver_avatar_url': self.receiver.avatar_url or AVATAR_CHOICES[0]
         }
-
 # =======================================================
 # ==================== API 路由 =========================
 # =======================================================
@@ -207,6 +228,7 @@ def register():
     db.session.commit()
     return jsonify({'message': '注册成功！', 'user': new_user.to_dict()}), 201
 
+# 【【【第四处修改：更新登录API】】】
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -218,11 +240,16 @@ def login():
             'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
         }, app.config['SECRET_KEY'], algorithm='HS256')
         return jsonify({
-            'message': '登录成功！', 'token': token, 'username': user.username,
-            'likes_received': user.likes_received
+            'message': '登录成功！', 
+            'token': token, 
+            'username': user.username,
+            'user_id': user.id, # 确保返回了user_id
+            'likes_received': user.likes_received,
+            'avatar_url': user.avatar_url or AVATAR_CHOICES[0] # 返回头像URL
         })
     else:
         return jsonify({'message': '用户名或密码错误'}), 401
+
 
 @app.route('/api/user/stats', methods=['GET'])
 def get_user_stats():
@@ -691,6 +718,35 @@ def send_chat_message():
         db.session.rollback()
         print(f"Error in send_chat_message: {e}")
         return jsonify({'error': '发送失败，服务器内部错误'}), 500
+# 【【【第三处新增：创建全新的API端点】】】
+
+# 1. 提供所有可选头像列表的API
+@app.route('/api/avatars', methods=['GET'])
+def get_avatar_choices():
+    return jsonify(AVATAR_CHOICES)
+
+# 2. 更新当前登录用户头像的API
+@app.route('/api/user/avatar', methods=['POST'])
+def update_user_avatar():
+    user_info = get_user_from_token()
+    if not user_info:
+        return jsonify({'error': '未授权'}), 401
+
+    data = request.get_json()
+    new_avatar_url = data.get('avatar_url')
+
+    # 安全检查：确保前端发来的URL在我们预设的列表里
+    if not new_avatar_url or new_avatar_url not in AVATAR_CHOICES:
+        return jsonify({'error': '无效的头像选择'}), 400
+
+    user = User.query.get(user_info['user_id'])
+    if not user:
+        return jsonify({'error': '用户不存在'}), 404
+
+    user.avatar_url = new_avatar_url
+    db.session.commit()
+
+    return jsonify({'message': '头像更新成功', 'new_avatar_url': new_avatar_url})
 
      
 # --- 9. 启动应用 ---
