@@ -160,6 +160,30 @@ class PlazaComment(db.Model):
             'author_likes': self.author.likes_received, # 通过关系直接获取作者的点赞数
             'topic_id': self.topic_id
         }
+# 【【【新增代码：聊天消息模型】】】
+class ChatMessage(db.Model):
+    __tablename__ = 'chat_messages'
+    id = db.Column(db.Integer, primary_key=True)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    
+    # 关联到发送者
+    sender_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    # 关联到接收者
+    receiver_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+
+    # 建立关系，这里需要用 foreign_keys 来区分 sender 和 receiver
+    sender = db.relationship('User', foreign_keys=[sender_id], backref='sent_messages')
+    receiver = db.relationship('User', foreign_keys=[receiver_id], backref='received_messages')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'content': self.content,
+            'created_at': self.created_at.isoformat() + 'Z',
+            'sender_id': self.sender_id,
+            'receiver_id': self.receiver_id
+        }
 
 # =======================================================
 # ==================== API 路由 =========================
@@ -554,6 +578,92 @@ def like_plaza_comment(comment_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': '点赞失败，服务器错误'}), 500
+# 【【【新增代码：Chat 和 User 相关的API】】】
+
+# 获取所有用户列表（除了自己）
+@app.route('/api/users', methods=['GET'])
+def get_users():
+    user_info = get_user_from_token()
+    if not user_info:
+        return jsonify({'error': '未授权'}), 401
+    
+    # 查询除了当前用户以外的所有用户
+    users = User.query.filter(User.id != user_info['user_id']).all()
+    return jsonify([user.to_dict() for user in users])
+
+# 给某个用户点赞
+@app.route('/api/users/<int:user_id>/like', methods=['POST'])
+def like_user(user_id):
+    user_info = get_user_from_token()
+    if not user_info:
+        return jsonify({'error': '未授权'}), 401
+    
+    if user_id == user_info['user_id']:
+        return jsonify({'error': '不能给自己点赞'}), 400
+
+    user_to_like = User.query.get(user_id)
+    if not user_to_like:
+        return jsonify({'error': '用户不存在'}), 404
+
+    try:
+        user_to_like.likes_received += 1
+        db.session.commit()
+        return jsonify({
+            'message': '点赞成功',
+            'new_likes_count': user_to_like.likes_received
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': '服务器错误'}), 500
+
+# 获取与另一个用户的聊天记录
+@app.route('/api/chat/<int:other_user_id>', methods=['GET'])
+def get_chat_history(other_user_id):
+    user_info = get_user_from_token()
+    if not user_info:
+        return jsonify({'error': '未授权'}), 401
+    
+    current_user_id = user_info['user_id']
+    
+    # 查询两个用户之间的所有消息
+    # 条件是：(我发给他 OR 他发给我)
+    messages = ChatMessage.query.filter(
+        ((ChatMessage.sender_id == current_user_id) & (ChatMessage.receiver_id == other_user_id)) |
+        ((ChatMessage.sender_id == other_user_id) & (ChatMessage.receiver_id == current_user_id))
+    ).order_by(ChatMessage.created_at.asc()).all()
+    
+    return jsonify([message.to_dict() for message in messages])
+
+# 发送聊天消息
+@app.route('/api/chat/send', methods=['POST'])
+def send_chat_message():
+    user_info = get_user_from_token()
+    if not user_info:
+        return jsonify({'error': '未授权'}), 401
+
+    data = request.get_json()
+    receiver_id = data.get('receiver_id')
+    content = data.get('content')
+
+    if not receiver_id or not content or not content.strip():
+        return jsonify({'error': '接收者ID和内容不能为空'}), 400
+
+    # 检查接收者是否存在
+    if not User.query.get(receiver_id):
+        return jsonify({'error': '接收用户不存在'}), 404
+
+    try:
+        new_message = ChatMessage(
+            sender_id=user_info['user_id'],
+            receiver_id=receiver_id,
+            content=content
+        )
+        db.session.add(new_message)
+        db.session.commit()
+        return jsonify(new_message.to_dict()), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': '发送失败，服务器错误'}), 500
 
 
        
