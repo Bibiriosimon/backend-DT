@@ -517,8 +517,10 @@ def get_topic_details(topic_id):
     })
 
 # 为帖子添加新评论
+# 为帖子添加新评论
 @app.route('/api/plaza/topics/<int:topic_id>/comments', methods=['POST'])
- try:
+def post_comment(topic_id):
+    try:
         user_info = get_user_from_token()
         if not user_info:
             return jsonify({'error': '未授权，请先登录'}), 401
@@ -542,8 +544,8 @@ def get_topic_details(topic_id):
         db.session.commit()
         return jsonify(new_comment.to_dict()), 201
     except Exception as e:
-        db.session.rollback() # 发生错误时回滚数据库操作，非常重要！
-        print(f"Error in post_comment: {e}") # 在服务器日志中打印错误，方便排查
+        db.session.rollback()
+        print(f"Error in post_comment: {e}")
         return jsonify({'error': '评论失败，服务器内部错误'}), 500
 
 # 点赞一个评论（增加评论作者的总获赞数）
@@ -638,9 +640,9 @@ def get_chat_history(other_user_id):
         print(f"Error in get_chat_history: {e}")
         return jsonify({'error': '获取聊天记录时发生服务器错误'}), 500
 # 发送聊天消息
+# 发送聊天消息
 @app.route('/api/chat/send', methods=['POST'])
 def send_chat_message():
-    # 【【【修改开始】】】
     try:
         user_info = get_user_from_token()
         if not user_info:
