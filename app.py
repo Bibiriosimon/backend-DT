@@ -5,8 +5,9 @@ import requests
 from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, or_
 import psycopg2.extras
+
 # --- 1. 初始化和配置 ---
 app = Flask(__name__)
 CORS(app, supports_credentials=True) 
@@ -30,19 +31,15 @@ AVATAR_CHOICES = [
     "https://pic1.imgdb.cn/item/688b192a58cb8da5c8f46e09.jpg",
     "https://pic1.imgdb.cn/item/688b191f58cb8da5c8f46dd4.jpg",
     "https://pic1.imgdb.cn/item/688b1e6458cb8da5c8f481ed.jpg"
-    
 ]
 
 # --- 2. 数据模型 ---
-# 【【【第二处修改：更新User模型】】】
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password = db.Column(db.String(120), nullable=False)
     likes_received = db.Column(db.Integer, nullable=False, default=0)
-    
-    # 新增 avatar_url 字段，可以为空
     avatar_url = db.Column(db.String(255), nullable=True)
   
     def to_dict(self):
@@ -50,10 +47,8 @@ class User(db.Model):
             'id': self.id, 
             'username': self.username,
             'likes_received': self.likes_received,
-            # 如果用户没头像，给一个默认的，防止前端出错
             'avatar_url': self.avatar_url or AVATAR_CHOICES[0]
         }
-
 
 class Like(db.Model):
     __tablename__ = 'likes'
@@ -97,13 +92,12 @@ class Vocab(db.Model):
             'phonetic': self.phonetic,
             'meaning': self.meaning 
         }
+
 class Feedback(db.Model):
     __tablename__ = 'feedbacks'
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
-  
-    # 我们把反馈和用户关联起来，这样就知道是谁提的建议了
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     user = db.relationship('User', backref=db.backref('feedbacks', lazy=True))
 
@@ -114,27 +108,7 @@ class Feedback(db.Model):
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S'),
             'user_id': self.user_id
         }
-# --- 3. 数据库表创建 ---
-with app.app_context():
-    db.create_all()
 
-
-# --- 4. JWT 身份验证辅助函数 ---
-def get_user_from_token():
-    auth_header = request.headers.get('Authorization')
-    if not auth_header or not auth_header.startswith('Bearer '):
-        return None
-    token = auth_header.split(" ")[1]
-    try:
-        data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
-        return {'user_id': data['user_id'], 'username': data['username']}
-    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-        return None
-# --- 2. 数据模型 ---
-# ... 你已有的 User, Like, Note, Vocab, Feedback 模型 ...
-
-# 【【【新增代码】】】
-# Plaza 帖子的模型
 class PlazaTopic(db.Model):
     __tablename__ = 'plaza_topics'
     id = db.Column(db.Integer, primary_key=True)
@@ -142,11 +116,7 @@ class PlazaTopic(db.Model):
     content = db.Column(db.Text)
     image_url = db.Column(db.String(255))
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
-  
-    # 【关键】使用 username 作为外键
     author_username = db.Column(db.String(80), db.ForeignKey('users.username', onupdate='CASCADE', ondelete='CASCADE'), nullable=False)
-  
-    # 建立关系，这样可以方便地通过 topic.author 访问到 User 对象
     author = db.relationship('User', backref=db.backref('plaza_topics', lazy=True, cascade="all, delete-orphan"))
 
     def to_dict(self):
@@ -159,17 +129,14 @@ class PlazaTopic(db.Model):
             'author_username': self.author.username,
             'author_avatar_url': self.author.avatar_url or AVATAR_CHOICES[0]
         }
+
 class PlazaComment(db.Model):
     __tablename__ = 'plaza_comments'
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
-  
-    # 关联到发评论的用户
     author_username = db.Column(db.String(80), db.ForeignKey('users.username', ondelete='CASCADE'), nullable=False)
     author = db.relationship('User', backref=db.backref('plaza_comments', lazy=True))
-  
-    # 关联到被评论的帖子
     topic_id = db.Column(db.Integer, db.ForeignKey('plaza_topics.id', ondelete='CASCADE'), nullable=False)
     topic = db.relationship('PlazaTopic', backref=db.backref('comments', lazy=True, cascade="all, delete-orphan"))
 
@@ -183,24 +150,19 @@ class PlazaComment(db.Model):
             'author_avatar_url': self.author.avatar_url or AVATAR_CHOICES[0],
             'topic_id': self.topic_id
         }
-# 【【【新增代码：聊天消息模型】】】
-# ==========================================================
-# ==              第一处修改：ChatMessage 模型             ==
-# ==========================================================
+
 class ChatMessage(db.Model):
     __tablename__ = 'chat_messages'
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
-    
-    # 【核心修改】使用 username 作为外键，与你的数据库表结构匹配
     sender_username = db.Column(db.String(80), db.ForeignKey('users.username', ondelete='CASCADE'), nullable=False)
     receiver_username = db.Column(db.String(80), db.ForeignKey('users.username', ondelete='CASCADE'), nullable=False)
 
-    # 建立关系，让 SQLAlchemy 知道如何通过 username 找到 User 对象
-    # remote_side=[User.username] 告诉 SQLAlchemy 关系的“远程”端是 User 表的 username 列
-    sender = db.relationship('User', foreign_keys=[sender_username], primaryjoin='ChatMessage.sender_username == User.username')
-    receiver = db.relationship('User', foreign_keys=[receiver_username], primaryjoin='ChatMessage.receiver_username == User.username')
+    # 【【【核心修复】】】
+    # 明确指定每个关系(sender, receiver)对应的外键列，消除歧义。
+    sender = db.relationship('User', foreign_keys=[sender_username])
+    receiver = db.relationship('User', foreign_keys=[receiver_username])
 
     def to_dict(self):
         return {
@@ -214,6 +176,23 @@ class ChatMessage(db.Model):
             'sender_avatar_url': self.sender.avatar_url or AVATAR_CHOICES[0],
             'receiver_avatar_url': self.receiver.avatar_url or AVATAR_CHOICES[0]
         }
+
+# --- 3. 数据库表创建 ---
+with app.app_context():
+    db.create_all()
+
+# --- 4. JWT 身份验证辅助函数 ---
+def get_user_from_token():
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return None
+    token = auth_header.split(" ")[1]
+    try:
+        data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        return {'user_id': data['user_id'], 'username': data['username']}
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
+
 # =======================================================
 # ==================== API 路由 =========================
 # =======================================================
@@ -230,7 +209,6 @@ def register():
     db.session.commit()
     return jsonify({'message': '注册成功！', 'user': new_user.to_dict()}), 201
 
-# 【【【第四处修改：更新登录API】】】
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -245,13 +223,12 @@ def login():
             'message': '登录成功！', 
             'token': token, 
             'username': user.username,
-            'user_id': user.id, # 确保返回了user_id
+            'user_id': user.id,
             'likes_received': user.likes_received,
-            'avatar_url': user.avatar_url or AVATAR_CHOICES[0] # 返回头像URL
+            'avatar_url': user.avatar_url or AVATAR_CHOICES[0]
         })
     else:
         return jsonify({'message': '用户名或密码错误'}), 401
-
 
 @app.route('/api/user/stats', methods=['GET'])
 def get_user_stats():
@@ -260,7 +237,6 @@ def get_user_stats():
     user = User.query.get(user_info['user_id'])
     if not user: return jsonify({'error': '用户不存在'}), 404
     return jsonify({'likes_received': user.likes_received})
-
 
 # --- 6. 笔记和单词本 API ---
 @app.route('/api/notes', methods=['POST'])
@@ -308,43 +284,20 @@ def add_vocab():
 
 @app.route('/api/vocab/<int:vocab_id>', methods=['PUT', 'DELETE'])
 def handle_single_vocab(vocab_id):
-    # 1. 验证用户身份
     user_info = get_user_from_token()
-    if not user_info:
-        return jsonify({'error': '未授权'}), 401
-
-    # 2. 从数据库中查找属于该用户的特定单词
+    if not user_info: return jsonify({'error': '未授权'}), 401
     vocab_item = Vocab.query.filter_by(id=vocab_id, user_id=user_info['user_id']).first()
-    if not vocab_item:
-        return jsonify({'error': '单词不存在或无权访问'}), 404
-
-    # 3. 如果是 PUT 请求，则执行更新逻辑
+    if not vocab_item: return jsonify({'error': '单词不存在或无权访问'}), 404
     if request.method == 'PUT':
-        try:
-            data = request.get_json()
-            # 检查前端是否发送了 'word' 字段，如果有就更新它
-            if 'word' in data:
-                vocab_item.word = data['word']
-          
-            # (这个接口将来还可以扩展，比如更新 phonetic 或 meaning)
-            # if 'phonetic' in data:
-            #     vocab_item.phonetic = data['phonetic']
-
-            db.session.commit()
-            return jsonify({'message': '单词更新成功'}), 200
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': f'更新失败: {str(e)}'}), 500
-
-    # 4. 如果是 DELETE 请求，则执行删除逻辑
+        data = request.get_json()
+        if 'word' in data: vocab_item.word = data['word']
+        db.session.commit()
+        return jsonify({'message': '单词更新成功'}), 200
     if request.method == 'DELETE':
-        try:
-            db.session.delete(vocab_item)
-            db.session.commit()
-            return jsonify({'message': '单词已删除'})
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': f'删除失败: {str(e)}'}), 500
+        db.session.delete(vocab_item)
+        db.session.commit()
+        return jsonify({'message': '单词已删除'})
+
 @app.route('/api/vocab', methods=['GET'])
 def get_vocab():
     user_info = get_user_from_token()
@@ -359,6 +312,7 @@ def get_rank_list():
     if not user_info: return jsonify({'error': '未授权'}), 401
     current_user_id = user_info['user_id']
   
+    # 【恢复】使用您原来的 group_by 写法，更严谨
     rank_query = db.session.query(
         User.id, User.username, User.likes_received,
         func.count(Vocab.id).label('vocab_count')
@@ -369,17 +323,8 @@ def get_rank_list():
 
     likes_by_me = Like.query.filter_by(liker_id=current_user_id).all()
     liked_user_ids = {like.liked_user_id for like in likes_by_me}
-
-    rank_list = [{
-        'user_id': user.id, 'username': user.username,
-        'likes_received': user.likes_received, 'vocab_count': user.vocab_count
-    } for user in rank_query]
-
-    # 【【【 关键修复！！！】】】 删除这里多余的右括号
-    return jsonify({
-        'rankings': rank_list,
-        'liked_by_me': list(liked_user_ids)
-    })
+    rank_list = [{'user_id': user.id, 'username': user.username, 'likes_received': user.likes_received, 'vocab_count': user.vocab_count} for user in rank_query]
+    return jsonify({'rankings': rank_list, 'liked_by_me': list(liked_user_ids)})
 
 @app.route('/api/user/<int:liked_user_id>/like', methods=['POST'])
 def toggle_like(liked_user_id):
@@ -387,10 +332,8 @@ def toggle_like(liked_user_id):
     if not user_info: return jsonify({'error': '未授权'}), 401
     liker_id = user_info['user_id']
     if liker_id == liked_user_id: return jsonify({'error': '不能给自己点赞'}), 400
-  
     liked_user = User.query.get(liked_user_id)
     if not liked_user: return jsonify({'error': '被点赞的用户不存在'}), 404
-
     existing_like = Like.query.filter_by(liker_id=liker_id, liked_user_id=liked_user_id).first()
     if existing_like:
         db.session.delete(existing_like)
@@ -401,39 +344,30 @@ def toggle_like(liked_user_id):
         db.session.add(new_like)
         liked_user.likes_received += 1
         message = '点赞成功'
-  
     db.session.commit()
     return jsonify({'message': message, 'new_like_count': liked_user.likes_received})
+
 @app.route('/api/feedback', methods=['POST'])
 def submit_feedback():
-    # 1. 验证用户身份
     user_info = get_user_from_token()
-    if not user_info:
-        return jsonify({'error': '未授权，请先登录'}), 401
-
-    # 2. 获取前端发来的数据
+    if not user_info: return jsonify({'error': '未授权，请先登录'}), 401
     data = request.get_json()
     content = data.get('content')
-    if not content or not content.strip():
-        return jsonify({'error': '反馈内容不能为空'}), 400
-
-    # 3. 创建新的Feedback记录并存入数据库
-    new_feedback = Feedback(
-        content=content,
-        user_id=user_info['user_id']
-    )
+    if not content or not content.strip(): return jsonify({'error': '反馈内容不能为空'}), 400
+    new_feedback = Feedback(content=content, user_id=user_info['user_id'])
     db.session.add(new_feedback)
     db.session.commit()
-
-    # 4. 返回成功信息
     return jsonify({'message': '感谢您的反馈！我们已经收到啦！'}), 201
+
+# 【恢复】补上被遗漏的测试路由
 @app.route('/api/test-deploy', methods=['GET'])
 def test_deploy_route():
     return jsonify({
         'message': '新代码部署成功！这个测试路由正在工作！',
         'timestamp': datetime.datetime.utcnow().isoformat()
     })
-# --- 8. API 代理服务 (省略以保持简洁) ---
+
+# --- 8. API 代理服务 & 其他 ---
 @app.route('/api/deepl-translate', methods=['POST'])
 def deepl_translate_proxy():
     api_key = os.environ.get('DEEPL_API_KEY')
@@ -467,114 +401,49 @@ def dictionary_proxy(word):
     except (requests.exceptions.RequestException, requests.exceptions.JSONDecodeError) as e:
         return jsonify({'error': '词典服务连接或解析失败', 'details': str(e)}), 502
 
-@app.route('/admin/reset-database/areyousure/<secret_key>')
-def reset_database(secret_key):
-    reset_word = os.environ.get('RESET_SECRET_WORD', 'my_default_reset_word')
-    if secret_key != reset_word:
-        return jsonify({"error": "密码错误，无法执行危险操作"}), 403
-    try:
-        with app.app_context():
-            db.drop_all()
-            db.create_all()
-        return jsonify({"message": "数据库已成功重置！"}), 200
-    except Exception as e:
-        return jsonify({"error": f"重置数据库时发生错误: {str(e)}"}), 500
-# (确保你的import语句里有这个，psycopg2.extras，如果没有，请加上)
-import psycopg2.extras # 在文件顶部添加这个
-
-# ... 你之前的 /register 和 /login 代码在这里 ...
-
-# --- Plaza API 端点 ---
-
-# 3. 获取所有 Plaza 帖子
 @app.route('/api/plaza/topics', methods=['GET'])
 def get_plaza_topics():
     try:
-        # 使用 SQLAlchemy 查询，并按时间倒序
         topics = PlazaTopic.query.order_by(PlazaTopic.created_at.desc()).all()
-        # 将查询到的对象列表转换为字典列表
         return jsonify([topic.to_dict() for topic in topics])
     except Exception as e:
-        # 捕获任何可能的数据库错误，并返回一个清晰的JSON错误信息
-        print(f"Error fetching plaza topics: {e}") # 在服务器日志中打印详细错误
+        print(f"Error fetching plaza topics: {e}")
         return jsonify({'error': '获取帖子列表时发生服务器错误'}), 500
 
-# 发布新帖子
 @app.route('/api/plaza/topics', methods=['POST'])
 def publish_plaza_topic():
-    # 从 token 获取当前用户
     user_info = get_user_from_token()
-    if not user_info:
-        return jsonify({'error': '未授权，请先登录'}), 401
-
+    if not user_info: return jsonify({'error': '未授权，请先登录'}), 401
     data = request.get_json()
-    title = data.get('title')
-    content = data.get('content')
-    image_url = data.get('image_url') # 如果没有，默认为 None
-
-    if not title or not content:
-        return jsonify({"error": "标题和内容不能为空"}), 400
-
+    title, content, image_url = data.get('title'), data.get('content'), data.get('image_url')
+    if not title or not content: return jsonify({"error": "标题和内容不能为空"}), 400
     try:
-        # 创建一个新的 PlazaTopic 对象
-        new_topic = PlazaTopic(
-            title=title,
-            content=content,
-            image_url=image_url,
-            author_username=user_info['username']  # 【关键】从token中获取用户名
-        )
-      
-        # 使用 SQLAlchemy 的 session 来添加和提交
+        new_topic = PlazaTopic(title=title, content=content, image_url=image_url, author_username=user_info['username'])
         db.session.add(new_topic)
         db.session.commit()
-
-        # 返回成功信息和新帖子的数据
         return jsonify(new_topic.to_dict()), 201
-
     except Exception as e:
-        db.session.rollback() # 如果发生错误，回滚事务
+        db.session.rollback()
         print(f"Error publishing plaza topic: {e}")
         return jsonify({'error': '发布帖子时发生服务器错误'}), 500
-# 【【【新增代码：Plaza详情、评论、点赞的API】】】
 
-# 获取单个帖子及其所有评论
 @app.route('/api/plaza/topics/<int:topic_id>', methods=['GET'])
 def get_topic_details(topic_id):
-    # 使用 get_or_404 可以简洁地处理找不到帖子的情况
     topic = PlazaTopic.query.get_or_404(topic_id)
-  
-    # 查询该帖子的所有评论，并按时间正序排列
     comments = PlazaComment.query.filter_by(topic_id=topic_id).order_by(PlazaComment.created_at.asc()).all()
+    return jsonify({"topic": topic.to_dict(), "comments": [comment.to_dict() for comment in comments]})
 
-    return jsonify({
-        "topic": topic.to_dict(),
-        "comments": [comment.to_dict() for comment in comments]
-    })
-
-# 为帖子添加新评论
-# 为帖子添加新评论
 @app.route('/api/plaza/topics/<int:topic_id>/comments', methods=['POST'])
 def post_comment(topic_id):
+    user_info = get_user_from_token()
+    if not user_info: return jsonify({'error': '未授权，请先登录'}), 401
+    data = request.get_json()
+    content = data.get('content')
+    if not content or not content.strip(): return jsonify({"error": "评论内容不能为空"}), 400
+    topic = PlazaTopic.query.get(topic_id)
+    if not topic: return jsonify({"error": "帖子不存在"}), 404
     try:
-        user_info = get_user_from_token()
-        if not user_info:
-            return jsonify({'error': '未授权，请先登录'}), 401
-
-        data = request.get_json()
-        content = data.get('content')
-        if not content or not content.strip():
-            return jsonify({"error": "评论内容不能为空"}), 400
-
-        # 检查帖子是否存在
-        topic = PlazaTopic.query.get(topic_id)
-        if not topic:
-            return jsonify({"error": "帖子不存在"}), 404
-
-        new_comment = PlazaComment(
-            content=content,
-            topic_id=topic_id,
-            author_username=user_info['username'] # 从Token中获取用户名
-        )
+        new_comment = PlazaComment(content=content, topic_id=topic_id, author_username=user_info['username'])
         db.session.add(new_comment)
         db.session.commit()
         return jsonify(new_comment.to_dict()), 201
@@ -583,136 +452,72 @@ def post_comment(topic_id):
         print(f"Error in post_comment: {e}")
         return jsonify({'error': '评论失败，服务器内部错误'}), 500
 
-# 点赞一个评论（增加评论作者的总获赞数）
 @app.route('/api/plaza/comments/<int:comment_id>/like', methods=['POST'])
 def like_plaza_comment(comment_id):
-    # 点赞也需要登录
     user_info = get_user_from_token()
-    if not user_info:
-        return jsonify({'error': '未授权，请先登录'}), 401
-
-    # 找到被点赞的评论
+    if not user_info: return jsonify({'error': '未授权，请先登录'}), 401
     comment = PlazaComment.query.get(comment_id)
-    if not comment:
-        return jsonify({"error": "评论不存在"}), 404
-      
-    # 找到评论的作者
+    if not comment: return jsonify({"error": "评论不存在"}), 404
     author_to_like = User.query.filter_by(username=comment.author_username).first()
-    if not author_to_like:
-        return jsonify({"error": "评论作者不存在"}), 404
-      
-    # 【注意】这里我们不允许给自己点赞，逻辑上更合理
-    if author_to_like.id == user_info['user_id']:
-        return jsonify({'error': '不能给自己的评论点赞'}), 400
-
+    if not author_to_like: return jsonify({"error": "评论作者不存在"}), 404
+    if author_to_like.id == user_info['user_id']: return jsonify({'error': '不能给自己的评论点赞'}), 400
     try:
         author_to_like.likes_received += 1
         db.session.commit()
-        return jsonify({
-            "message": "点赞成功!", 
-            "new_likes_count": author_to_like.likes_received
-        })
+        return jsonify({"message": "点赞成功!", "new_likes_count": author_to_like.likes_received})
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': '点赞失败，服务器错误'}), 500
-# 【【【新增代码：Chat 和 User 相关的API】】】
 
-# 获取所有用户列表（除了自己）
 @app.route('/api/users', methods=['GET'])
 def get_users():
     user_info = get_user_from_token()
-    if not user_info:
-        return jsonify({'error': '未授权'}), 401
-  
-    # 查询除了当前用户以外的所有用户
+    if not user_info: return jsonify({'error': '未授权'}), 401
     users = User.query.filter(User.id != user_info['user_id']).all()
     return jsonify([user.to_dict() for user in users])
 
-# 给某个用户点赞
 @app.route('/api/users/<int:user_id>/like', methods=['POST'])
 def like_user(user_id):
     user_info = get_user_from_token()
-    if not user_info:
-        return jsonify({'error': '未授权'}), 401
-  
-    if user_id == user_info['user_id']:
-        return jsonify({'error': '不能给自己点赞'}), 400
-
+    if not user_info: return jsonify({'error': '未授权'}), 401
+    if user_id == user_info['user_id']: return jsonify({'error': '不能给自己点赞'}), 400
     user_to_like = User.query.get(user_id)
-    if not user_to_like:
-        return jsonify({'error': '用户不存在'}), 404
-
+    if not user_to_like: return jsonify({'error': '用户不存在'}), 404
     try:
         user_to_like.likes_received += 1
         db.session.commit()
-        return jsonify({
-            'message': '点赞成功',
-            'new_likes_count': user_to_like.likes_received
-        })
+        return jsonify({'message': '点赞成功', 'new_likes_count': user_to_like.likes_received})
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': '服务器错误'}), 500
 
-# 获取与另一个用户的聊天记录
-# 获取与另一个用户的聊天记录
-# ==========================================================
-# ==           第二处修改：获取聊天记录 API                ==
-# ==========================================================
 @app.route('/api/chat/<int:other_user_id>', methods=['GET'])
 def get_chat_history(other_user_id):
-    try:
-        user_info = get_user_from_token()
-        if not user_info:
-            return jsonify({'error': '未授权'}), 401
-    
-        current_user_username = user_info['username']
-        
-        # 【核心修改】根据 ID 找到对方用户的 username
-        other_user = User.query.get(other_user_id)
-        if not other_user:
-            return jsonify({'error': '聊天对象不存在'}), 404
-        other_user_username = other_user.username
+    user_info = get_user_from_token()
+    if not user_info: return jsonify({'error': '未授权'}), 401
+    current_user_username = user_info['username']
+    other_user = User.query.get(other_user_id)
+    if not other_user: return jsonify({'error': '聊天对象不存在'}), 404
+    other_user_username = other_user.username
+    messages = ChatMessage.query.filter(
+        or_(
+            (ChatMessage.sender_username == current_user_username) & (ChatMessage.receiver_username == other_user_username),
+            (ChatMessage.sender_username == other_user_username) & (ChatMessage.receiver_username == current_user_username)
+        )
+    ).order_by(ChatMessage.created_at.asc()).all()
+    return jsonify([message.to_dict() for message in messages])
 
-        # 【核心修改】使用 username 进行查询
-        messages = ChatMessage.query.filter(
-            ((ChatMessage.sender_username == current_user_username) & (ChatMessage.receiver_username == other_user_username)) |
-            ((ChatMessage.sender_username == other_user_username) & (ChatMessage.receiver_username == current_user_username))
-        ).order_by(ChatMessage.created_at.asc()).all()
-    
-        return jsonify([message.to_dict() for message in messages])
-    except Exception as e:
-        print(f"Error in get_chat_history: {e}")
-        return jsonify({'error': '获取聊天记录时发生服务器错误'}), 500
-
-# 发送聊天消息
-# ==========================================================
-# ==              第三处修改：发送消息 API                 ==
-# ==========================================================
 @app.route('/api/chat/send', methods=['POST'])
 def send_chat_message():
+    user_info = get_user_from_token()
+    if not user_info: return jsonify({'error': '未授权'}), 401
+    data = request.get_json()
+    receiver_id, content = data.get('receiver_id'), data.get('content')
+    if not receiver_id or not content or not content.strip(): return jsonify({'error': '接收者ID和内容不能为空'}), 400
+    receiver_user = User.query.get(receiver_id)
+    if not receiver_user: return jsonify({'error': '接收用户不存在'}), 404
     try:
-        user_info = get_user_from_token()
-        if not user_info:
-            return jsonify({'error': '未授权'}), 401
-
-        data = request.get_json()
-        receiver_id = data.get('receiver_id')
-        content = data.get('content')
-
-        if not receiver_id or not content or not content.strip():
-            return jsonify({'error': '接收者ID和内容不能为空'}), 400
-
-        # 【核心修改】根据前端传来的 receiver_id 找到接收者的 User 对象
-        receiver_user = User.query.get(receiver_id)
-        if not receiver_user:
-            return jsonify({'error': '接收用户不存在'}), 404
-
-        # 【核心修改】创建消息时，使用 username
-        new_message = ChatMessage(
-            sender_username=user_info['username'],
-            receiver_username=receiver_user.username,
-            content=content
-        )
+        new_message = ChatMessage(sender_username=user_info['username'], receiver_username=receiver_user.username, content=content)
         db.session.add(new_message)
         db.session.commit()
         return jsonify(new_message.to_dict()), 201
@@ -720,67 +525,54 @@ def send_chat_message():
         db.session.rollback()
         print(f"Error in send_chat_message: {e}")
         return jsonify({'error': '发送失败，服务器内部错误'}), 500
-# 【【【第三处新增：创建全新的API端点】】】
 
-# 1. 提供所有可选头像列表的API
 @app.route('/api/avatars', methods=['GET'])
 def get_avatar_choices():
     return jsonify(AVATAR_CHOICES)
 
-# 2. 更新当前登录用户头像的API
 @app.route('/api/user/avatar', methods=['POST'])
 def update_user_avatar():
     user_info = get_user_from_token()
-    if not user_info:
-        return jsonify({'error': '未授权'}), 401
-
+    if not user_info: return jsonify({'error': '未授权'}), 401
     data = request.get_json()
     new_avatar_url = data.get('avatar_url')
-
-    # 安全检查：确保前端发来的URL在我们预设的列表里
-    if not new_avatar_url or new_avatar_url not in AVATAR_CHOICES:
-        return jsonify({'error': '无效的头像选择'}), 400
-
+    if not new_avatar_url or new_avatar_url not in AVATAR_CHOICES: return jsonify({'error': '无效的头像选择'}), 400
     user = User.query.get(user_info['user_id'])
-    if not user:
-        return jsonify({'error': '用户不存在'}), 404
-
+    if not user: return jsonify({'error': '用户不存在'}), 404
     user.avatar_url = new_avatar_url
     db.session.commit()
-
     return jsonify({'message': '头像更新成功', 'new_avatar_url': new_avatar_url})
 
 @app.route('/api/chat/<int:partner_id>/new', methods=['GET'])
 def get_new_chat_messages(partner_id):
     user_info = get_user_from_token()
-    if not user_info:
-        return jsonify({'error': '未授权'}), 401
-
-    # 【注意】这里我们用ID，因为外键是ID更高效
-    user_id = user_info['user_id']
-    
-    # 1. 从URL参数中获取 "since" 值，代表前端已有的最新消息ID
+    if not user_info: return jsonify({'error': '未授权'}), 401
     since_message_id = request.args.get('since', 0, type=int)
-
-    # 2. 找到对方用户
     other_user = User.query.get(partner_id)
-    if not other_user:
-        return jsonify({'error': '聊天对象不存在'}), 404
-
-    # 3. 使用 username 进行查询，因为你的模型是这样定义的
+    if not other_user: return jsonify({'error': '聊天对象不存在'}), 404
     current_user_username = user_info['username']
     other_user_username = other_user.username
-
     messages = ChatMessage.query.filter(
-        (
-            (ChatMessage.sender_username == current_user_username) & (ChatMessage.receiver_username == other_user_username) |
+        ChatMessage.id > since_message_id,
+        or_(
+            (ChatMessage.sender_username == current_user_username) & (ChatMessage.receiver_username == other_user_username),
             (ChatMessage.sender_username == other_user_username) & (ChatMessage.receiver_username == current_user_username)
-        ),
-        # 【关键】只查询ID大于前端最新ID的消息
-        ChatMessage.id > since_message_id
+        )
     ).order_by(ChatMessage.created_at.asc()).all()
-
     return jsonify([msg.to_dict() for msg in messages])     
+
+@app.route('/admin/reset-database/areyousure/<secret_key>')
+def reset_database(secret_key):
+    reset_word = os.environ.get('RESET_SECRET_WORD', 'my_default_reset_word')
+    if secret_key != reset_word: return jsonify({"error": "密码错误，无法执行危险操作"}), 403
+    try:
+        with app.app_context():
+            db.drop_all()
+            db.create_all()
+        return jsonify({"message": "数据库已成功重置！"}), 200
+    except Exception as e:
+        return jsonify({"error": f"重置数据库时发生错误: {str(e)}"}), 500
+
 # --- 9. 启动应用 ---
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
