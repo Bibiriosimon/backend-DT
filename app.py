@@ -21,14 +21,14 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a-very-strong-default-s
 
 db = SQLAlchemy(app)
 AVATAR_CHOICES = [
-    "https://api.dicebear.com/8.x/pixel-art/svg?seed=user1",
-    "https://api.dicebear.com/8.x/adventurer/svg?seed=user2",
-    "https://api.dicebear.com/8.x/miniavs/svg?seed=user3",
-    "https://api.dicebear.com/8.x/bottts/svg?seed=user4",
-    "https://api.dicebear.com/8.x/thumbs/svg?seed=user5",
-    "https://api.dicebear.com/8.x/lorelei/svg?seed=user6",
-    "https://api.dicebear.com/8.x/notionists/svg?seed=user7",
-    "https://api.dicebear.com/8.x/fun-emoji/svg?seed=user8"
+    "https://pic1.imgdb.cn/item/688b193f58cb8da5c8f46e89.jpg",
+    "https://pic1.imgdb.cn/item/688b193b58cb8da5c8f46e75.jpg",
+    "https://pic1.imgdb.cn/item/688b193958cb8da5c8f46e6a.jpg",
+    "https://pic1.imgdb.cn/item/688b193558cb8da5c8f46e53.jpg",
+    "https://pic1.imgdb.cn/item/688b193158cb8da5c8f46e38.jpg",
+    "https://pic1.imgdb.cn/item/688b192f58cb8da5c8f46e27.jpg",
+    "https://pic1.imgdb.cn/item/688b192a58cb8da5c8f46e09.jpg",
+    "https://pic1.imgdb.cn/item/688b191f58cb8da5c8f46dd4.jpg"
 ]
 
 # --- 2. 数据模型 ---
