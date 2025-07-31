@@ -748,7 +748,37 @@ def update_user_avatar():
 
     return jsonify({'message': '头像更新成功', 'new_avatar_url': new_avatar_url})
 
-     
+@app.route('/api/chat/<int:partner_id>/new', methods=['GET'])
+def get_new_chat_messages(partner_id):
+    user_info = get_user_from_token()
+    if not user_info:
+        return jsonify({'error': '未授权'}), 401
+
+    # 【注意】这里我们用ID，因为外键是ID更高效
+    user_id = user_info['user_id']
+    
+    # 1. 从URL参数中获取 "since" 值，代表前端已有的最新消息ID
+    since_message_id = request.args.get('since', 0, type=int)
+
+    # 2. 找到对方用户
+    other_user = User.query.get(partner_id)
+    if not other_user:
+        return jsonify({'error': '聊天对象不存在'}), 404
+
+    # 3. 使用 username 进行查询，因为你的模型是这样定义的
+    current_user_username = user_info['username']
+    other_user_username = other_user.username
+
+    messages = ChatMessage.query.filter(
+        (
+            (ChatMessage.sender_username == current_user_username) & (ChatMessage.receiver_username == other_user_username) |
+            (ChatMessage.sender_username == other_user_username) & (ChatMessage.receiver_username == current_user_username)
+        ),
+        # 【关键】只查询ID大于前端最新ID的消息
+        ChatMessage.id > since_message_id
+    ).order_by(ChatMessage.created_at.asc()).all()
+
+    return jsonify([msg.to_dict() for msg in messages])     
 # --- 9. 启动应用 ---
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
