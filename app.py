@@ -136,18 +136,30 @@ class PlazaTopic(db.Model):
             'created_at': self.created_at.isoformat() + 'Z', # 使用ISO格式，前端兼容性更好
             'author_username': self.author_username
         }
+class PlazaComment(db.Model):
+    __tablename__ = 'plaza_comments'
+    id = db.Column(db.Integer, primary_key=True)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    
+    # 关联到发评论的用户
+    author_username = db.Column(db.String(80), db.ForeignKey('users.username', ondelete='CASCADE'), nullable=False)
+    author = db.relationship('User', backref=db.backref('plaza_comments', lazy=True))
+    
+    # 关联到被评论的帖子
+    topic_id = db.Column(db.Integer, db.ForeignKey('plaza_topics.id', ondelete='CASCADE'), nullable=False)
+    topic = db.relationship('PlazaTopic', backref=db.backref('comments', lazy=True, cascade="all, delete-orphan"))
 
-# Plaza 评论的模型 (如果以后要加评论功能，可以先放着)
-# class PlazaComment(db.Model):
-#     __tablename__ = 'plaza_comments'
-#     id = db.Column(db.Integer, primary_key=True)
-#     content = db.Column(db.Text, nullable=False)
-#     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
-#     author_username = db.Column(db.String(80), db.ForeignKey('users.username', onupdate='CASCADE', ondelete='CASCADE'), nullable=False)
-#     topic_id = db.Column(db.Integer, db.ForeignKey('plaza_topics.id', ondelete='CASCADE'), nullable=False)
-#     
-#     author = db.relationship('User', backref=db.backref('plaza_comments', lazy=True))
-#     topic = db.relationship('PlazaTopic', backref=db.backref('comments', lazy=True, cascade="all, delete-orphan"))
+    def to_dict(self):
+        # 在返回字典时，一并返回作者的点赞数，方便前端展示
+        return {
+            'id': self.id,
+            'content': self.content,
+            'created_at': self.created_at.isoformat() + 'Z',
+            'author_username': self.author_username,
+            'author_likes': self.author.likes_received, # 通过关系直接获取作者的点赞数
+            'topic_id': self.topic_id
+        }
 
 # =======================================================
 # ==================== API 路由 =========================
@@ -464,6 +476,85 @@ def publish_plaza_topic():
         db.session.rollback() # 如果发生错误，回滚事务
         print(f"Error publishing plaza topic: {e}")
         return jsonify({'error': '发布帖子时发生服务器错误'}), 500
+# 【【【新增代码：Plaza详情、评论、点赞的API】】】
+
+# 获取单个帖子及其所有评论
+@app.route('/api/plaza/topics/<int:topic_id>', methods=['GET'])
+def get_topic_details(topic_id):
+    # 使用 get_or_404 可以简洁地处理找不到帖子的情况
+    topic = PlazaTopic.query.get_or_404(topic_id)
+    
+    # 查询该帖子的所有评论，并按时间正序排列
+    comments = PlazaComment.query.filter_by(topic_id=topic_id).order_by(PlazaComment.created_at.asc()).all()
+
+    return jsonify({
+        "topic": topic.to_dict(),
+        "comments": [comment.to_dict() for comment in comments]
+    })
+
+# 为帖子添加新评论
+@app.route('/api/plaza/topics/<int:topic_id>/comments', methods=['POST'])
+def post_comment(topic_id):
+    user_info = get_user_from_token()
+    if not user_info:
+        return jsonify({'error': '未授权，请先登录'}), 401
+
+    data = request.get_json()
+    content = data.get('content')
+    if not content or not content.strip():
+        return jsonify({"error": "评论内容不能为空"}), 400
+
+    # 检查帖子是否存在
+    topic = PlazaTopic.query.get(topic_id)
+    if not topic:
+        return jsonify({"error": "帖子不存在"}), 404
+
+    try:
+        new_comment = PlazaComment(
+            content=content,
+            topic_id=topic_id,
+            author_username=user_info['username'] # 从Token中获取用户名
+        )
+        db.session.add(new_comment)
+        db.session.commit()
+        return jsonify(new_comment.to_dict()), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': '评论失败，服务器错误'}), 500
+
+# 点赞一个评论（增加评论作者的总获赞数）
+@app.route('/api/plaza/comments/<int:comment_id>/like', methods=['POST'])
+def like_plaza_comment(comment_id):
+    # 点赞也需要登录
+    user_info = get_user_from_token()
+    if not user_info:
+        return jsonify({'error': '未授权，请先登录'}), 401
+
+    # 找到被点赞的评论
+    comment = PlazaComment.query.get(comment_id)
+    if not comment:
+        return jsonify({"error": "评论不存在"}), 404
+        
+    # 找到评论的作者
+    author_to_like = User.query.filter_by(username=comment.author_username).first()
+    if not author_to_like:
+        return jsonify({"error": "评论作者不存在"}), 404
+        
+    # 【注意】这里我们不允许给自己点赞，逻辑上更合理
+    if author_to_like.id == user_info['user_id']:
+        return jsonify({'error': '不能给自己的评论点赞'}), 400
+
+    try:
+        author_to_like.likes_received += 1
+        db.session.commit()
+        return jsonify({
+            "message": "点赞成功!", 
+            "new_likes_count": author_to_like.likes_received
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': '点赞失败，服务器错误'}), 500
+
 
        
 # --- 9. 启动应用 ---
