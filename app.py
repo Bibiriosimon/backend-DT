@@ -1,6 +1,6 @@
 import os
 import datetime
-import jwt
+# import jwt  # <-- 【修改1】我们不再需要直接导入底层的 jwt 库
 import requests
 from flask import Flask, jsonify, request, session
 from flask_cors import CORS
@@ -8,17 +8,33 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func, desc, or_
 import psycopg2.extras
 import mistune
+
+# 【修改2】导入 Flask-JWT-Extended 的所有必要组件
+from flask_jwt_extended import JWTManager, create_access_token, get_jwt_identity, jwt_required
+
 # --- 1. 初始化和配置 ---
 app = Flask(__name__)
 CORS(app, supports_credentials=True) 
 markdown_parser = mistune.create_markdown(escape=True, hard_wrap=True)
+
+# 数据库 URL 配置 (这部分你的代码是正确的，保持不变)
 db_url = os.environ.get('DATABASE_URL')
 if db_url and db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a-very-strong-default-secret-key-for-local-dev')
+
+# 【修改3】为 Flask-JWT-Extended 配置密钥
+# 注意：它使用的是 'JWT_SECRET_KEY'，而不是 'SECRET_KEY'
+app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'a-very-strong-jwt-secret-key-for-dev') 
+
+# 【修改4】初始化 JWTManager
+jwt = JWTManager(app)
+
+# 注意：Flask 本身的 SECRET_KEY 主要用于 session 和 flash 消息，如果你不用这些，可以不设置
+# 但保留它也是个好习惯
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a-default-flask-secret-key')
 
 db = SQLAlchemy(app)
 AVATAR_CHOICES = [
@@ -600,4 +616,5 @@ def reset_database(secret_key):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     app.run(host='0.0.0.0', port=port, debug=True)
+
 
