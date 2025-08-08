@@ -7,11 +7,11 @@ from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func, desc, or_
 import psycopg2.extras
-
+import mistune
 # --- 1. 初始化和配置 ---
 app = Flask(__name__)
 CORS(app, supports_credentials=True) 
-
+markdown_parser = mistune.create_markdown(escape=True, hard_wrap=True)
 db_url = os.environ.get('DATABASE_URL')
 if db_url and db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
@@ -411,21 +411,44 @@ def get_plaza_topics():
         return jsonify({'error': '获取帖子列表时发生服务器错误'}), 500
 
 @app.route('/api/plaza/topics', methods=['POST'])
+@jwt_required()
 def publish_plaza_topic():
-    user_info = get_user_from_token()
-    if not user_info: return jsonify({'error': '未授权，请先登录'}), 401
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+    if not user:
+        return jsonify({'error': '用户未找到'}), 404
+        
     data = request.get_json()
-    title, content, image_url = data.get('title'), data.get('content'), data.get('image_url')
-    if not title or not content: return jsonify({"error": "标题和内容不能为空"}), 400
+    title = data.get('title')
+    # 【修改1】获取包含 Markdown 的原始文本
+    raw_content = data.get('content') 
+    
+    # 【删除】不再接收独立的 image_url
+    # image_url = data.get('image_url')
+
+    if not title or not raw_content:
+        return jsonify({"error": "标题和内容不能为空"}), 400
+    
     try:
-        new_topic = PlazaTopic(title=title, content=content, image_url=image_url, author_username=user_info['username'])
+        # 【修改2】将 Markdown 转换为安全的 HTML
+        html_content = markdown_parser(raw_content)
+
+        # 【修改3】创建一个新的 PlazaTopic 实例
+        # content 字段现在存储的是转换后的 HTML
+        # image_url 字段不再需要手动设置，让它保持数据库的默认值 (NULL)
+        new_topic = PlazaTopic(
+            title=title, 
+            content=html_content, # 存储 HTML
+            author_id=user.id
+        )
         db.session.add(new_topic)
         db.session.commit()
+
+        # to_dict() 方法会自动返回所有字段，包括新的 HTML content
         return jsonify(new_topic.to_dict()), 201
     except Exception as e:
         db.session.rollback()
-        print(f"Error publishing plaza topic: {e}")
-        return jsonify({'error': '发布帖子时发生服务器错误'}), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/plaza/topics/<int:topic_id>', methods=['GET'])
 def get_topic_details(topic_id):
@@ -577,3 +600,4 @@ def reset_database(secret_key):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     app.run(host='0.0.0.0', port=port, debug=True)
+
