@@ -15,4 +15,5 @@ PyJWT             # 用于生成和解码 JWT (我们的 app.py 用的是这个!
 # --- API 请求 ---
 requests          # 用于在后端请求 DeepL 和 DeepSeek API
 
+mistune  
 
