@@ -49,7 +49,12 @@ AVATAR_CHOICES = [
     "https://pic1.imgdb.cn/item/688b192f58cb8da5c8f46e27.jpg",
     "https://pic1.imgdb.cn/item/688b192a58cb8da5c8f46e09.jpg",
     "https://pic1.imgdb.cn/item/688b191f58cb8da5c8f46dd4.jpg",
-    "https://pic1.imgdb.cn/item/688b1e6458cb8da5c8f481ed.jpg"
+    "https://pic1.imgdb.cn/item/688b1e6458cb8da5c8f481ed.jpg",
+    "https://pic1.imgdb.cn/item/6895ba7358cb8da5c8124f18.jpg",
+    "https://pic1.imgdb.cn/item/6895baaf58cb8da5c81250a6.jpg",
+    "https://pic1.imgdb.cn/item/6895bab258cb8da5c81250bb.jpg",
+    "https://pic1.imgdb.cn/item/6895badc58cb8da5c81251e8.jpg",
+    "https://pic1.imgdb.cn/item/6895bafd58cb8da5c81252ad.jpg"
 ]
 
 # --- 2. 数据模型 ---
@@ -647,6 +652,7 @@ def reset_database(secret_key):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     app.run(host='0.0.0.0', port=port, debug=True)
+
 
 
 
