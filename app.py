@@ -1,25 +1,45 @@
+# app.py
+
+# --- 1. 导入所有需要的库 ---
 import os
-from datetime import datetime, timedelta, timezone # <-- 【新增】需要用它来设置过期时间
-import jwt                                       # <-- 【修改】导入 jwt
+from datetime import datetime, timedelta, timezone
+import jwt
 import requests
+import mistune # 你之前用到了 mistune，需要导入它
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-# ... 其他导入 ...
+from sqlalchemy import func, desc, or_ # 你代码后面用到了这些，也需要导入
+from werkzeug.security import generate_password_hash, check_password_hash # 强烈建议使用的安全工具
 
-# 【删除】下面这几行关于 flask_jwt_extended 的代码全部删除
-# from flask_jwt_extended import JWTManager, create_access_token, get_jwt_identity, jwt_required
 
-# --- 初始化和配置 ---
+# --- 2. 初始化和配置 ---
 app = Flask(__name__)
-# ... CORS, markdown_parser, db_url 等配置保持不变 ...
+
+# 配置 CORS，允许跨域请求
+CORS(app, supports_credentials=True)
+
+# 配置 Markdown 解析器 (如果你的代码中用到了)
+# markdown_parser = mistune.create_markdown(escape=True, hard_wrap=True)
+
+# 从环境变量获取数据库 URL，并修正格式 (Heroku/Render 的常见做法)
+db_url = os.environ.get('DATABASE_URL')
+if db_url and db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+# 配置 SQLAlchemy 数据库连接 URI
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+
+# 关闭 SQLAlchemy 的事件通知系统，可以节省资源
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# 【修改】我们现在用 Flask 的主密钥作为 JWT 的密钥。确保它被设置！
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a-very-strong-default-secret-key')
+# 配置应用的 SECRET_KEY，用于 session、flash 消息和我们的 JWT 签名
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a-very-strong-default-secret-key-for-dev')
 
+# 初始化 SQLAlchemy 实例
 db = SQLAlchemy(app)
+
+
 AVATAR_CHOICES = [
     "https://pic1.imgdb.cn/item/688b193958cb8da5c8f46e6a.jpg",
     "https://pic1.imgdb.cn/item/688b193f58cb8da5c8f46e89.jpg",
@@ -597,6 +617,7 @@ def reset_database(secret_key):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     app.run(host='0.0.0.0', port=port, debug=True)
+
 
 
 
