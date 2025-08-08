@@ -431,43 +431,72 @@ def get_plaza_topics():
         return jsonify({'error': '获取帖子列表时发生服务器错误'}), 500
 
 @app.route('/api/plaza/topics', methods=['POST'])
-def publish_plaza_topic(): # <-- 【修改1】删除 @jwt_required() 装饰器
-    # 【修改2】使用我们自己的辅助函数，就像其他路由一样
+def publish_plaza_topic():
+    print("\n--- [DEBUG] Received a new request to /api/plaza/topics ---")
+
     user_info = get_user_from_token()
     if not user_info:
+        print("[DEBUG] Request rejected: No valid token found.")
         return jsonify({'error': '未授权，请先登录'}), 401
 
     user = User.query.get(user_info['user_id'])
     if not user:
+        print(f"[DEBUG] Request rejected: User with ID {user_info['user_id']} not found.")
         return jsonify({'error': '用户未找到'}), 404
         
     data = request.get_json()
+    if not data:
+        print("[DEBUG] Request rejected: No JSON data received.")
+        return jsonify({"error": "请求体为空"}), 400
+
     title = data.get('title')
     raw_content = data.get('content') 
 
+    # --- 关卡 1: 打印从前端收到的原始数据 ---
+    print(f"[DEBUG] 1. Received raw title: {title}")
+    print(f"[DEBUG] 2. Received raw content:\n---\n{raw_content}\n---")
+
+
     if not title or not raw_content:
+        print("[DEBUG] Request rejected: Title or content is empty.")
         return jsonify({"error": "标题和内容不能为空"}), 400
     
     try:
-        # Mistune 默认就是安全的，会转义 HTML，所以这行可以简化
+        # --- 关卡 2: 调用 mistune 进行转换 ---
+        print("[DEBUG] 3. Calling mistune.html() to convert content...")
         html_content = mistune.html(raw_content)
+        
+        # --- 关卡 3: 打印转换后的 HTML ---
+        print(f"[DEBUG] 4. Content after mistune conversion:\n---\n{html_content}\n---")
 
-        # author_id 已被 author_username 取代，这里应使用 author_username
         new_topic = PlazaTopic(
             title=title, 
-            content=html_content,
-            author_username=user.username  # <-- 【修改3】使用 user.username
+            content=html_content,  # 确保这里用的是 html_content
+            author_username=user.username
         )
+
+        # --- 关卡 4: 准备保存到数据库 ---
+        print(f"[DEBUG] 5. Creating PlazaTopic object. Content to be saved is:\n---\n{new_topic.content}\n---")
+        
         db.session.add(new_topic)
         db.session.commit()
 
-        return jsonify(new_topic.to_dict()), 201
+        # --- 关卡 5: 提交成功后 ---
+        print("[DEBUG] 6. Topic successfully saved to database.")
+        
+        # --- 关卡 6: 准备返回给前端的数据 ---
+        response_data = new_topic.to_dict()
+        print(f"[DEBUG] 7. Returning JSON response. Content in response is:\n---\n{response_data.get('content')}\n---")
+
+        return jsonify(response_data), 201
+
     except Exception as e:
         db.session.rollback()
-        # 在日志中打印详细错误，方便调试
-        print(f"Error in publish_plaza_topic: {str(e)}")
+        # --- 异常情况 ---
+        print(f"[DEBUG] !!! An exception occurred: {str(e)} !!!")
+        import traceback
+        traceback.print_exc() # 打印完整的错误堆栈
         return jsonify({"error": "发布失败，服务器内部错误"}), 500
-
 @app.route('/api/plaza/topics/<int:topic_id>', methods=['GET'])
 def get_topic_details(topic_id):
     topic = PlazaTopic.query.get_or_404(topic_id)
@@ -618,6 +647,7 @@ def reset_database(secret_key):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     app.run(host='0.0.0.0', port=port, debug=True)
+
 
 
 
