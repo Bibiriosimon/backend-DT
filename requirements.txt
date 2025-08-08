@@ -1,4 +1,4 @@
-# requirements.txt (干净、正确的版本)
+# requirements.txt (修正认证库后的版本)
 
 # --- Web 框架和服务器 ---
 Flask
@@ -6,14 +6,15 @@ gunicorn
 Flask-Cors
 
 # --- 数据库 ---
-Flask-SQLAlchemy  # ORM 扩展
-psycopg2-binary   # PostgreSQL 数据库驱动
+Flask-SQLAlchemy
+psycopg2-binary
 
 # --- 认证 ---
-PyJWT             # 用于生成和解码 JWT (我们的 app.py 用的是这个!)
+# 【【【修改】】】使用 Flask-JWT-Extended，它提供了 @jwt_required
+Flask-JWT-Extended 
 
 # --- API 请求 ---
-requests          # 用于在后端请求 DeepL 和 DeepSeek API
+requests
 
-mistune  
-
+# --- 内容处理 ---
+mistune
