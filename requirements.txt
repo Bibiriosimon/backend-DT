@@ -1,20 +1,11 @@
-# requirements.txt (修正认证库后的版本)
 
-# --- Web 框架和服务器 ---
 Flask
 gunicorn
 Flask-Cors
-
-# --- 数据库 ---
 Flask-SQLAlchemy
 psycopg2-binary
+PyJWT
 
-# --- 认证 ---
-# 【【【修改】】】使用 Flask-JWT-Extended，它提供了 @jwt_required
-Flask-JWT-Extended 
-
-# --- API 请求 ---
 requests
 
-# --- 内容处理 ---
 mistune
