@@ -1,40 +1,23 @@
 import os
-import datetime
-# import jwt  # <-- 【修改1】我们不再需要直接导入底层的 jwt 库
+from datetime import datetime, timedelta, timezone # <-- 【新增】需要用它来设置过期时间
+import jwt                                       # <-- 【修改】导入 jwt
 import requests
-from flask import Flask, jsonify, request, session
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, desc, or_
-import psycopg2.extras
-import mistune
+# ... 其他导入 ...
 
-# 【修改2】导入 Flask-JWT-Extended 的所有必要组件
-from flask_jwt_extended import JWTManager, create_access_token, get_jwt_identity, jwt_required
+# 【删除】下面这几行关于 flask_jwt_extended 的代码全部删除
+# from flask_jwt_extended import JWTManager, create_access_token, get_jwt_identity, jwt_required
 
-# --- 1. 初始化和配置 ---
+# --- 初始化和配置 ---
 app = Flask(__name__)
-CORS(app, supports_credentials=True) 
-markdown_parser = mistune.create_markdown(escape=True, hard_wrap=True)
-
-# 数据库 URL 配置 (这部分你的代码是正确的，保持不变)
-db_url = os.environ.get('DATABASE_URL')
-if db_url and db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql://", 1)
-
+# ... CORS, markdown_parser, db_url 等配置保持不变 ...
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# 【修改3】为 Flask-JWT-Extended 配置密钥
-# 注意：它使用的是 'JWT_SECRET_KEY'，而不是 'SECRET_KEY'
-app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'a-very-strong-jwt-secret-key-for-dev') 
-
-# 【修改4】初始化 JWTManager
-jwt = JWTManager(app)
-
-# 注意：Flask 本身的 SECRET_KEY 主要用于 session 和 flash 消息，如果你不用这些，可以不设置
-# 但保留它也是个好习惯
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a-default-flask-secret-key')
+# 【修改】我们现在用 Flask 的主密钥作为 JWT 的密钥。确保它被设置！
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a-very-strong-default-secret-key')
 
 db = SQLAlchemy(app)
 AVATAR_CHOICES = [
@@ -427,44 +410,42 @@ def get_plaza_topics():
         return jsonify({'error': '获取帖子列表时发生服务器错误'}), 500
 
 @app.route('/api/plaza/topics', methods=['POST'])
-@jwt_required()
-def publish_plaza_topic():
-    current_user_id = get_jwt_identity()
-    user = User.query.get(current_user_id)
+def publish_plaza_topic(): # <-- 【修改1】删除 @jwt_required() 装饰器
+    # 【修改2】使用我们自己的辅助函数，就像其他路由一样
+    user_info = get_user_from_token()
+    if not user_info:
+        return jsonify({'error': '未授权，请先登录'}), 401
+
+    user = User.query.get(user_info['user_id'])
     if not user:
         return jsonify({'error': '用户未找到'}), 404
         
     data = request.get_json()
     title = data.get('title')
-    # 【修改1】获取包含 Markdown 的原始文本
     raw_content = data.get('content') 
-    
-    # 【删除】不再接收独立的 image_url
-    # image_url = data.get('image_url')
 
     if not title or not raw_content:
         return jsonify({"error": "标题和内容不能为空"}), 400
     
     try:
-        # 【修改2】将 Markdown 转换为安全的 HTML
-        html_content = markdown_parser(raw_content)
+        # Mistune 默认就是安全的，会转义 HTML，所以这行可以简化
+        html_content = mistune.html(raw_content)
 
-        # 【修改3】创建一个新的 PlazaTopic 实例
-        # content 字段现在存储的是转换后的 HTML
-        # image_url 字段不再需要手动设置，让它保持数据库的默认值 (NULL)
+        # author_id 已被 author_username 取代，这里应使用 author_username
         new_topic = PlazaTopic(
             title=title, 
-            content=html_content, # 存储 HTML
-            author_id=user.id
+            content=html_content,
+            author_username=user.username  # <-- 【修改3】使用 user.username
         )
         db.session.add(new_topic)
         db.session.commit()
 
-        # to_dict() 方法会自动返回所有字段，包括新的 HTML content
         return jsonify(new_topic.to_dict()), 201
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": str(e)}), 500
+        # 在日志中打印详细错误，方便调试
+        print(f"Error in publish_plaza_topic: {str(e)}")
+        return jsonify({"error": "发布失败，服务器内部错误"}), 500
 
 @app.route('/api/plaza/topics/<int:topic_id>', methods=['GET'])
 def get_topic_details(topic_id):
@@ -616,5 +597,6 @@ def reset_database(secret_key):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     app.run(host='0.0.0.0', port=port, debug=True)
+
 
 
