@@ -236,7 +236,8 @@ def login():
     if user and user.password == password:
         token = jwt.encode({
             'user_id': user.id, 'username': user.username,
-            'exp': datetime.utcnow() + datetime.timedelta(hours=24)
+            # 正确的代码
+            'exp': datetime.utcnow() + timedelta(hours=24)
         }, app.config['SECRET_KEY'], algorithm='HS256')
         return jsonify({
             'message': '登录成功！', 
@@ -617,6 +618,7 @@ def reset_database(secret_key):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     app.run(host='0.0.0.0', port=port, debug=True)
+
 
 
 
