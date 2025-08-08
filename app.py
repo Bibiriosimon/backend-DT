@@ -72,7 +72,7 @@ class User(db.Model):
 class Like(db.Model):
     __tablename__ = 'likes'
     id = db.Column(db.Integer, primary_key=True)
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
     liker_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     liked_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     __table_args__ = (db.UniqueConstraint('liker_id', 'liked_user_id', name='_liker_liked_user_uc'),)
@@ -82,7 +82,7 @@ class Note(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
     summary = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     user = db.relationship('User', backref=db.backref('notes', lazy=True, cascade="all, delete-orphan"))
 
@@ -116,7 +116,7 @@ class Feedback(db.Model):
     __tablename__ = 'feedbacks'
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     user = db.relationship('User', backref=db.backref('feedbacks', lazy=True))
 
@@ -134,7 +134,7 @@ class PlazaTopic(db.Model):
     title = db.Column(db.String(255), nullable=False)
     content = db.Column(db.Text)
     image_url = db.Column(db.String(255))
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     author_username = db.Column(db.String(80), db.ForeignKey('users.username', onupdate='CASCADE', ondelete='CASCADE'), nullable=False)
     author = db.relationship('User', backref=db.backref('plaza_topics', lazy=True, cascade="all, delete-orphan"))
 
@@ -153,7 +153,7 @@ class PlazaComment(db.Model):
     __tablename__ = 'plaza_comments'
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     author_username = db.Column(db.String(80), db.ForeignKey('users.username', ondelete='CASCADE'), nullable=False)
     author = db.relationship('User', backref=db.backref('plaza_comments', lazy=True))
     topic_id = db.Column(db.Integer, db.ForeignKey('plaza_topics.id', ondelete='CASCADE'), nullable=False)
@@ -174,7 +174,7 @@ class ChatMessage(db.Model):
     __tablename__ = 'chat_messages'
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     sender_username = db.Column(db.String(80), db.ForeignKey('users.username', ondelete='CASCADE'), nullable=False)
     receiver_username = db.Column(db.String(80), db.ForeignKey('users.username', ondelete='CASCADE'), nullable=False)
 
@@ -236,7 +236,7 @@ def login():
     if user and user.password == password:
         token = jwt.encode({
             'user_id': user.id, 'username': user.username,
-            'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+            'exp': datetime.utcnow() + datetime.timedelta(hours=24)
         }, app.config['SECRET_KEY'], algorithm='HS256')
         return jsonify({
             'message': '登录成功！', 
@@ -383,7 +383,7 @@ def submit_feedback():
 def test_deploy_route():
     return jsonify({
         'message': '新代码部署成功！这个测试路由正在工作！',
-        'timestamp': datetime.datetime.utcnow().isoformat()
+        'timestamp': datetime.utcnow().isoformat()
     })
 
 # --- 8. API 代理服务 & 其他 ---
@@ -617,6 +617,7 @@ def reset_database(secret_key):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     app.run(host='0.0.0.0', port=port, debug=True)
+
 
 
 
